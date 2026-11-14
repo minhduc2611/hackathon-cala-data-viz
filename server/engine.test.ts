@@ -98,6 +98,20 @@ test("sort and not contains", async () => {
   assert.deepEqual(asc.rows.map((x) => x.name), ["C", "A", "B"]); // "n/a" has no number: last
 });
 
+test("check compares claims with sourced rows", async () => {
+  const rounds = [{ amount: "$10M", lead: "Sequoia" }, { amount: "~$30M", lead: "Benchmark and others" }];
+  const r = await runPath(rounds, [
+    { type: "check", claim: "Total", column: "amount", test: "sum", value: "{{total}}", tolerance: "20" },
+    { type: "check", claim: "Largest", column: "amount", test: "max", value: "100M", tolerance: "20" },
+    { type: "check", claim: "Lead", column: "lead", test: "contains", value: "benchmark", tolerance: "" },
+    { type: "check", claim: "Lead", column: "lead", test: "contains", value: "a16z", tolerance: "" },
+    { type: "check", claim: "Blank", column: "lead", test: "contains", value: "{{nothing}}", tolerance: "" },
+  ], { total: "$38M" }, none);
+  assert.deepEqual(r.steps.map((s) => s.check?.verdict), ["matches", "differs", "matches", "not in sources", "no claim"]);
+  assert.match(r.steps[1].check!.detail, /70% below the claimed \$100M/);
+  assert.equal(r.rows, rounds); // checks never change rows
+});
+
 test("cleanBoard keeps only the type's fields", () => {
   assert.deepEqual(cleanBoard({ type: "chart", x: "a", y: "b", extra: "z" }), { type: "chart", kind: "bar", x: "a", y: "b" });
   assert.throws(() => cleanBoard({ type: "pivot" }), /Unknown cell type/);

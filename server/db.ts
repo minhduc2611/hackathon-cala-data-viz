@@ -9,12 +9,14 @@ type Doc = Template & { _id: string };
 
 let collection: Promise<Collection<Doc>> | undefined;
 
+export const dbName = () => process.env.MONGODB_DB || "cala_contour";
+
 async function connect(): Promise<Collection<Doc>> {
   const uri = (process.env.MONGODB_CONNECTION_STRING ?? "").trim();
   if (!uri) throw new Error("MONGODB_CONNECTION_STRING missing. Put it in cala-data-visualization/.env.");
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000, appName: "cala-contour" });
   await client.connect();
-  const templates = client.db(process.env.MONGODB_DB || "cala_contour").collection<Doc>("templates");
+  const templates = client.db(dbName()).collection<Doc>("templates");
   await seedFromFiles(templates);
   return templates;
 }

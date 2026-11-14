@@ -1,15 +1,17 @@
 import { useId, useState } from "react";
-import { FIELDS, OPS, type Board, type Step } from "../../shared/types.ts";
+import { FIELDS, OPS, TESTS, type Board, type Step } from "../../shared/types.ts";
 import { ChartView } from "./ChartView.tsx";
 import { QueryBox } from "./QueryBox.tsx";
 import { Table } from "./Table.tsx";
+import { Verdict } from "./Verdict.tsx";
 
 const LABELS: Record<string, string> = {
   column: "Column", op: "Op", value: "Value", group: "Group by", fn: "Function", metric: "Metric column",
   kind: "Type", x: "X column", y: "Y column", text: "Note", other: "Join with source", on: "On column",
   name: "Source name", query: "Cala query", sep: "Separator", order: "Order",
+  claim: "Claim", test: "Test", tolerance: "Tolerance %",
 };
-const CHOICES: Record<string, readonly string[]> = { op: OPS, fn: ["count", "sum", "avg"], kind: ["bar", "line"], order: ["desc", "asc"] };
+const CHOICES: Record<string, readonly string[]> = { op: OPS, fn: ["count", "sum", "avg"], kind: ["bar", "line"], order: ["desc", "asc"], test: TESTS };
 const COLUMN_FIELDS = new Set(["column", "group", "metric", "x", "y", "on"]);
 
 interface Props {
@@ -63,6 +65,7 @@ export function Cell({ number, step, busy, onSave, onDelete }: Props) {
       {step.resolved && !step.error && <p className="muted">{step.resolved}</p>}
       {showRows && <Table rows={step.rows} columns={step.outColumns} total={step.rowCount} />}
       {step.chart && <ChartTabs step={step} />}
+      {step.check && <Verdict check={step.check} />}
       {type === "note" && step.text && <p className="story">{step.text}</p>}
     </section>
   );

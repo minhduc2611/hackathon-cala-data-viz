@@ -6,7 +6,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize } from "node:path";
 import type { Template } from "../shared/types.ts";
 import { chat, resetChat } from "./agent.ts";
+import { dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
+import { extractParams } from "./extract.ts";
 import { ROOT } from "./env.ts";
 import { NotFound, analyse, create, list, load, refresh, remove, save, suggestions } from "./store.ts";
 
@@ -43,6 +45,10 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   const parts = url.pathname.split("/").filter(Boolean).slice(1); // drop "api"
   const method = req.method ?? "GET";
   if (parts[0] === "suggestions" && method === "GET") return suggestions();
+  if (parts[0] === "health" && method === "GET") {
+    // Which store this deploy reads, without exposing the host or credentials.
+    return { storage: "mongodb", database: dbName(), templates: await (await templates()).countDocuments() };
+  }
   if (parts[0] !== "templates") throw new NotFound(url.pathname);
   if (parts.length === 1) {
     if (method === "GET") return (await list()).map(({ id, name, query }) => ({ id, name, query }));
@@ -66,6 +72,12 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     // Report view: run with other parameter values without saving them.
     const run = await analyse({ ...t, params: { ...t.params, ...cleanParams((await body(req)).params) } });
     return { ...run, savedParams: t.params };
+  }
+  if (sub === "extract" && method === "POST") {
+    const text = String((await body(req)).text ?? "").trim();
+    if (!text) throw new BadRequest("Paste the deck text first.");
+    if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
+    return extractParams(t, text);
   }
   if (sub === "refresh" && method === "POST") {
     refresh(t);

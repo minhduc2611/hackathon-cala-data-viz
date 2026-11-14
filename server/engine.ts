@@ -39,6 +39,14 @@ export function num(text: string | undefined): number | null {
 
 const fmt = (value: number) => (Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100));
 
+/** "$4.8B", "$30.7M", "1,200" for check results. */
+export function money(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${Number((value / 1e9).toFixed(2))}B`;
+  if (abs >= 1e6) return `$${Number((value / 1e6).toFixed(1))}M`;
+  return value.toLocaleString("en-US");
+}
+
 export function columns(rows: Row[]): string[] {
   return [...new Set(rows.flatMap((r) => Object.keys(r)))];
 }
@@ -141,6 +149,37 @@ export async function runPath(
           return dir * (x - y);
         });
       }
+    } else if (board.type === "check") {
+      // Compares a claim with the sourced rows; never changes the rows.
+      const { claim = "Claim", column = "", test = "sum" } = board;
+      const claimed = fill(board.value, params).trim();
+      const tolerance = Math.max(0, Number(board.tolerance || 20)) / 100;
+      const result = (verdict: NonNullable<Step["check"]>["verdict"], found: string, detail: string) => {
+        step.check = { claim, claimed, found, verdict, detail };
+      };
+      if (!claimed) result("no claim", "", "No claimed value set.");
+      else if (missing(column, cols)) step.error = missing(column, cols);
+      else if (test === "contains") {
+        const want = claimed.toLowerCase();
+        const hits = rows.filter((r) => (r[column] ?? "").toLowerCase().includes(want));
+        if (hits.length) result("matches", hits.map((r) => r[column]).slice(0, 3).join(" · "), `Named in ${hits.length} of ${rows.length} sourced rows.`);
+        else result("not in sources", "", `"${claimed}" does not appear in ${column} in any of ${rows.length} sourced rows.`);
+      } else if (test === "sum" || test === "max") {
+        const target = num(claimed);
+        const values = rows.map((r) => num(r[column])).filter((v): v is number => v !== null);
+        if (target === null || target === 0) step.error = `Claimed value "${claimed}" is not a number.`;
+        else if (!values.length) result("not in sources", "", `No ${column} figures in ${rows.length} sourced rows.`);
+        else {
+          const found = test === "sum" ? values.reduce((a, b) => a + b, 0) : Math.max(...values);
+          const gap = (found - target) / target;
+          const what = test === "sum" ? `Sum of ${values.length} sourced ${column} figures` : `Largest of ${values.length} sourced ${column} figures`;
+          result(
+            Math.abs(gap) <= tolerance ? "matches" : "differs",
+            money(found),
+            `${what}: ${money(found)}, ${Math.abs(Math.round(gap * 100))}% ${gap < 0 ? "below" : "above"} the claimed ${money(target)} (tolerance ${Math.round(tolerance * 100)}%).`,
+          );
+        }
+      } else step.error = `Unknown test "${test}". Use sum, max or contains.`;
     } else if (board.type === "chart") {
       const { x = "", y = "" } = board;
       step.error = missing(x, cols) || missing(y, cols);

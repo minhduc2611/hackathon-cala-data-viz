@@ -17,6 +17,7 @@ Cell 1 is the main query (source "main"). Cells 2+ are boards:
 - aggregate: group, fn (count|sum|avg), metric. Output columns: the group column plus "count" or "<fn>_<metric>", sorted largest first.
 - split: column, sep (default ","). One row per item of a list cell: turns "Sequoia Capital, Benchmark" into one row each, so you can count edges (investors, founders, co-investors).
 - sort: column, order (desc|asc). Numbers sort as numbers; cells without a number go last. Sort years asc before a line chart.
+- check: claim (label), column, test (sum|max|contains), value (the claimed figure or name; {{params}} work), tolerance (% for sum/max, default 20). Compares a claim with the rows at that step and gives a verdict (matches / differs / not in sources). Does not change rows.
 - chart: kind (bar|line), x, y. Needs numbers in y. Does not change rows.
 - note: text. The insight in words.
 - query: name, query. Starts a new source; cells below work on its rows. Earlier sources stay joinable by name.

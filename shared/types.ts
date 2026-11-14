@@ -7,6 +7,7 @@ export const FIELDS = {
   aggregate: ["group", "metric", "fn"],
   split: ["column", "sep"],
   sort: ["column", "order"],
+  check: ["claim", "column", "test", "value", "tolerance"],
   chart: ["kind", "x", "y"],
   note: ["text"],
   join: ["other", "on"],
@@ -16,7 +17,8 @@ export const FIELDS = {
 export type BoardType = keyof typeof FIELDS;
 export const BOARD_TYPES = Object.keys(FIELDS) as BoardType[];
 export const OPS = ["=", "!=", "contains", "not contains", ">", "<", ">=", "<=", "is empty", "is not empty"] as const;
-export const DEFAULTS: Record<string, string> = { op: "=", fn: "count", kind: "bar", sep: ",", order: "desc" };
+export const DEFAULTS: Record<string, string> = { op: "=", fn: "count", kind: "bar", sep: ",", order: "desc", test: "sum", tolerance: "20" };
+export const TESTS = ["sum", "max", "contains"] as const;
 
 // Board fields are all strings, so a board stays a flat form.
 export interface Board {
@@ -30,6 +32,7 @@ export interface Template {
   query: string;
   params: Record<string, string>;
   boards: Board[];
+  paramHints?: Record<string, string>; // what each parameter means; shown in the report and used by "Fill from deck"
 }
 
 export interface ChartData {
@@ -37,6 +40,14 @@ export interface ChartData {
   labels: string[];
   values: (number | null)[];
   y: string;
+}
+
+export interface CheckResult {
+  claim: string;
+  claimed: string;
+  found: string; // what the sources say, as text
+  verdict: "matches" | "differs" | "not in sources" | "no claim";
+  detail: string;
 }
 
 export interface Step {
@@ -49,6 +60,7 @@ export interface Step {
   resolved?: string; // query cells: query after {{params}}
   text?: string; // note cells: text after {{params}}
   chart?: ChartData;
+  check?: CheckResult;
   rows: Row[]; // rows out of this cell, capped
   rowCount: number;
   outColumns: string[];

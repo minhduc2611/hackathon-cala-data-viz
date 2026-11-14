@@ -51,11 +51,6 @@ function Home() {
         <input id="template-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name a new analysis…" required />
         <button type="submit">Create template <span aria-hidden="true">→</span></button>
       </form>
-      <section className="hero">
-        <p className="eyebrow">Explore · Explain · Share</p>
-        <h1>Find the shape<br />in your data.</h1>
-        <p className="hero-copy">Build a repeatable path from query to insight. Adjust parameters, explore the results, then share a live report.</p>
-      </section>
       {error && <p className="error">{error}</p>}
       <section className="library">
         <div className="library-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h2>Analyses <span>{templates?.length ?? "—"}</span></h2></div>
