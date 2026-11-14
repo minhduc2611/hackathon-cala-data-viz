@@ -1,0 +1,26 @@
+{
+  "name": "cala-contour",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch server/index.ts & vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts",
+    "test": "tsx --test server/engine.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "chart.js": "^4.6.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
