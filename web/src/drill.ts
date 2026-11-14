@@ -15,7 +15,8 @@ export interface Drill {
  * (the companies behind "San Francisco: 13"), and a filter belongs before that aggregate.
  * Otherwise the detail is the chart's own rows and a filter goes right after the chart.
  */
-export function drill(run: Run, index: number, label: string): Drill {
+export function drill(run: Run, index: number, labels: string[]): Drill {
+  const picked = new Set(labels);
   const chart = run.steps[index];
   const column = chart.board.x;
   const k = selectionAt(run.steps.map((s) => s.board), index);
@@ -25,7 +26,7 @@ export function drill(run: Run, index: number, label: string): Drill {
   const total = source ? source.rowCount : run.rowCount;
   return {
     column,
-    rows: rows.filter((r) => (r[column] ?? "") === label),
+    rows: rows.filter((r) => picked.has(r[column] ?? "")),
     capped: rows.length < total,
     insertAt: aggregated ? k : index + 1,
     aggregated,

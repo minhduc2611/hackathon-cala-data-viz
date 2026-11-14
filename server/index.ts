@@ -73,8 +73,9 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     const b = await body(req);
     // Optional interactive selection: one bar of a chart cell, applied to the cells below it.
     const s = b.selection;
-    const selection = s && Number.isInteger(s.step) && typeof s.label === "string" && s.step >= 0 && s.step < t.boards.length
-      ? { step: s.step as number, label: s.label as string }
+    const labels = Array.isArray(s?.labels) ? s.labels.filter((l: unknown) => typeof l === "string").slice(0, 100) : [];
+    const selection = s && Number.isInteger(s.step) && s.step >= 0 && s.step < t.boards.length && labels.length
+      ? { step: s.step as number, labels: labels as string[] }
       : undefined;
     const run = await analyse({ ...t, params: { ...t.params, ...cleanParams(b.params) } }, selection);
     return { ...run, savedParams: t.params };

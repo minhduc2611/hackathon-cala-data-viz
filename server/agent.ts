@@ -19,6 +19,7 @@ Cell 1 is the main query (source "main"). Cells 2+ are boards:
 - sort: column, order (desc|asc). Numbers sort as numbers; cells without a number go last. Sort years asc before a line chart.
 - check: claim (label), column, test (sum|max|contains), value (the claimed figure or name; {{params}} work), tolerance (% for sum/max, default 20). Compares a claim with the rows at that step and gives a verdict (matches / differs / not in sources). Does not change rows.
 - chart: kind (bar|line), x, y. Needs numbers in y. Does not change rows.
+- graph: source, target (two columns). Draws a network: one edge per (source, target) pair, weighted by rows. Use after split to turn a list column into edges, e.g. split investors, then graph name → investors. Does not change rows.
 - note: text. The insight in words.
 - query: name, query. Starts a new source; cells below work on its rows. Earlier sources stay joinable by name.
 - join: other (a source name above this cell), on (column). Left join on exact case-insensitive text, first match; clashing columns become "<source>.<column>".

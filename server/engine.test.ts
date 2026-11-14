@@ -120,11 +120,12 @@ test("drill-down finds the rows behind a bar and where a filter goes", async () 
     { type: "chart", kind: "bar", x: "city", y: "count" },
   ], {}, none);
   const run = { resolved: "", error: "", rows: main, rowCount: 3, columns: ["name", "city"], steps: viaAggregate.steps };
-  const d = drill(run, 1, "Oslo");
+  const d = drill(run, 1, ["Oslo"]);
   assert.deepEqual(d.rows.map((r) => r.name), ["A", "B"]); // the companies behind "Oslo: 2", not the count row
   assert.equal(d.insertAt, 0); // filter goes before the aggregate
   const direct = await runPath(main, [{ type: "chart", kind: "bar", x: "name", y: "name" }], {}, none);
-  const d2 = drill({ ...run, steps: direct.steps }, 0, "C");
+  const d2 = drill({ ...run, steps: direct.steps }, 0, ["C"]);
+  assert.equal(drill(run, 1, ["Oslo", "Turku"]).rows.length, 3); // multi-select: rows behind both bars
   assert.deepEqual(d2.rows, [{ name: "C", city: "Turku" }]);
   assert.equal(d2.insertAt, 1); // no aggregate: filter goes after the chart
 });
@@ -148,9 +149,9 @@ test("a selection narrows only the cells below the chart", async () => {
     boards[2],
   ];
   // The aggregate above the chart is the selection point, so cell 4 sees Oslo's aggregate row only.
-  const r = await runWithSelection(main, path, {}, async () => [{ x: "1" }], { step: 1, label: "Oslo" });
+  const r = await runWithSelection(main, path, {}, async () => [{ x: "1" }], { step: 1, labels: ["Oslo"] });
   assert.deepEqual(r.steps[1].chart?.labels, ["Oslo", "Turku"]); // the clicked chart keeps every bar
-  assert.equal(r.steps[1].chart?.selected, "Oslo");
+  assert.deepEqual(r.steps[1].chart?.selected, ["Oslo"]);
   assert.deepEqual(r.steps[2].rows, [{ city: "Oslo", count: "2" }]);
   assert.equal(r.steps[2].selection, "city = Oslo");
   assert.equal(r.steps[3].selection, undefined); // the new query source has no "city" column: not narrowed
@@ -169,12 +170,44 @@ test("a selection cross-filters a later section that has the same value", async 
     { type: "sort", column: "deal", order: "asc" },
   ];
   const fetch = async (q: string) => (q === "rival" ? rival : other);
-  const r = await runWithSelection(main, path, {}, fetch, { step: 0, label: "2016" });
+  const r = await runWithSelection(main, path, {}, fetch, { step: 0, labels: ["2016"] });
   assert.deepEqual(r.steps[2].rows.map((x) => x.deal), ["X", "Y"]);
   assert.equal(r.steps[2].selection, "year = 2016");
   assert.deepEqual(r.steps[4].rows, other);
   assert.equal(r.steps[4].selection, undefined);
   assert.equal(r.steps.length, path.length);
+  // Multi-select (shift / cmd click): two years at once.
+  const two = await runWithSelection(main, path, {}, fetch, { step: 0, labels: ["2016", "2021"] });
+  assert.deepEqual(two.steps[2].rows.map((x) => x.deal), ["X", "Y", "Z"]);
+  assert.equal(two.steps[2].selection, "year is one of 2016, 2021");
+  assert.deepEqual(two.steps[0].chart?.selected, ["2016", "2021"]);
+});
+
+test("is one of / is not one of filters", async () => {
+  const keep = await run([{ type: "filter", column: "city", op: "is one of", value: "oslo | Turku" }]);
+  assert.equal(keep.rows.length, 3);
+  const drop = await run([{ type: "filter", column: "city", op: "is not one of", value: "Oslo" }]);
+  assert.deepEqual(drop.rows.map((x) => x.name), ["C"]);
+});
+
+test("graph turns rows into weighted edges between two columns", async () => {
+  const rows: Row[] = [
+    { name: "Stripe", investors: "Sequoia" },
+    { name: "Stripe", investors: "Sequoia" }, // same pair twice: one edge, weight 2
+    { name: "Airbnb", investors: "Sequoia" },
+    { name: "Airbnb", investors: "" }, // no target: skipped
+  ];
+  const r = await runPath(rows, [{ type: "graph", source: "name", target: "investors" }], {}, none);
+  const g = r.steps[0].graph!;
+  assert.deepEqual(g.edges.map(({ rows: _, ...e }) => e), [
+    { source: "s:Stripe", target: "t:Sequoia", weight: 2 },
+    { source: "s:Airbnb", target: "t:Sequoia", weight: 1 },
+  ]);
+  assert.deepEqual(g.edges[1].rows, [{ name: "Airbnb", investors: "Sequoia" }]); // the rows behind an edge
+  assert.deepEqual(g.nodes.find((n) => n.id === "t:Sequoia"), { id: "t:Sequoia", name: "Sequoia", side: "target", degree: 2 });
+  assert.equal(r.rows, rows); // a graph does not change rows
+  const bad = await runPath(rows, [{ type: "graph", source: "name", target: "nope" }], {}, none);
+  assert.match(bad.steps[0].error, /nope/);
 });
 
 test("cleanBoard keeps only the type's fields", () => {

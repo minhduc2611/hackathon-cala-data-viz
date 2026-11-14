@@ -4,14 +4,21 @@ import type { ChartData } from "../../shared/types.ts";
 
 Chart.register(...registerables);
 
-export function ChartView({ chart, label, onPick }: { chart: ChartData; label: string; onPick?: (label: string) => void }) {
+interface Props {
+  chart: ChartData;
+  label: string;
+  onPick?: (label: string, add: boolean) => void; // add = Shift or Cmd/Ctrl held: toggle within the selection
+}
+
+export function ChartView({ chart, label, onPick }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const pick = useRef(onPick);
   pick.current = onPick;
   useEffect(() => {
     const line = chart.kind === "line";
     // With a selection, the picked bar keeps the full colour and the others fade.
-    const color = chart.selected ? chart.labels.map((l) => (l === chart.selected ? "#1f4e79" : "#bccbd9")) : "#1f4e79";
+    const selected = new Set(chart.selected ?? []);
+    const color = selected.size ? chart.labels.map((l) => (selected.has(l) ? "#1f4e79" : "#bccbd9")) : "#1f4e79";
     const instance = new Chart(canvas.current!, {
       type: chart.kind,
       data: {
@@ -23,10 +30,12 @@ export function ChartView({ chart, label, onPick }: { chart: ChartData; label: s
         }],
       },
       options: {
-        // Click a bar or point to drill into the rows behind it.
-        onClick: (_event, elements) => {
+        // Click a bar to select it; Shift- or Cmd/Ctrl-click adds or removes bars.
+        onClick: (event, elements) => {
           const hit = elements[0];
-          if (hit && pick.current) pick.current(chart.labels[hit.index]);
+          const native = event.native as MouseEvent | null;
+          const add = Boolean(native && (native.shiftKey || native.metaKey || native.ctrlKey));
+          if (hit && pick.current) pick.current(chart.labels[hit.index], add);
         },
         onHover: (event, elements) => {
           const target = event.native?.target as HTMLElement | undefined;

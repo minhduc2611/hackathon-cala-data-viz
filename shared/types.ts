@@ -11,12 +11,13 @@ export const FIELDS = {
   chart: ["kind", "x", "y"],
   note: ["text"],
   join: ["other", "on"],
+  graph: ["source", "target"],
   query: ["name", "query"],
 } as const;
 
 export type BoardType = keyof typeof FIELDS;
 export const BOARD_TYPES = Object.keys(FIELDS) as BoardType[];
-export const OPS = ["=", "!=", "contains", "not contains", ">", "<", ">=", "<=", "is empty", "is not empty"] as const;
+export const OPS = ["=", "!=", "contains", "not contains", "is one of", "is not one of", ">", "<", ">=", "<=", "is empty", "is not empty"] as const;
 export const DEFAULTS: Record<string, string> = { op: "=", fn: "count", kind: "bar", sep: ",", order: "desc", test: "sum", tolerance: "20" };
 export const TESTS = ["sum", "max", "contains"] as const;
 
@@ -40,7 +41,16 @@ export interface ChartData {
   labels: string[];
   values: (number | null)[];
   y: string;
-  selected?: string; // the bar picked as the active selection
+  selected?: string[]; // the bars picked as the active selection
+}
+
+/** A two-sided network: source-column values on one side, target-column values on the other. */
+export interface GraphData {
+  source: string; // column names, for the legend
+  target: string;
+  nodes: { id: string; name: string; side: "source" | "target"; degree: number }[];
+  // ids; weight = rows with that pair; rows = up to EDGE_SAMPLE of those rows, shown when the edge is clicked
+  edges: { source: string; target: string; weight: number; rows: Row[] }[];
 }
 
 export interface CheckResult {
@@ -62,6 +72,7 @@ export interface Step {
   text?: string; // note cells: text after {{params}}
   chart?: ChartData;
   check?: CheckResult;
+  graph?: GraphData;
   rows: Row[]; // rows out of this cell, capped
   rowCount: number;
   outColumns: string[];

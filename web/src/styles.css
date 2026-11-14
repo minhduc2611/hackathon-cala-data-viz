@@ -151,3 +151,29 @@ th { color: #5b665b; font-size: .8rem; }
 .selection-bar { position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 0.8rem;
   flex-wrap: wrap; padding: 0.5rem 0.8rem; margin: 0.5rem 0; background: #eef3f8; border: 1px solid #9db4cc; }
 .selected-tag { display: inline-block; margin: 0 0 0.4rem; padding: 0.15rem 0.5rem; font-size: 0.85rem; background: #eef3f8; border: 1px solid #9db4cc; }
+
+/* Graph cells */
+.graph-bar { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.3rem 0 0.4rem; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; font-size: 0.85rem; margin: 0; }
+.graph-legend i { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; vertical-align: -0.05rem; box-shadow: 0 0 6px currentColor; }
+.graph-zoom { display: flex; gap: 0.3rem; }
+.graph-zoom button { padding: 0.2rem 0.6rem; margin: 0; }
+.graph-stage { width: 100%; height: auto; display: block; border-radius: 10px; touch-action: none; cursor: grab;
+  box-shadow: 0 10px 30px rgba(11, 21, 32, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.06); user-select: none; }
+.graph-stage:active { cursor: grabbing; }
+.graph-label { font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; fill: #e6eef7; paint-order: stroke;
+  stroke: #0b1520; stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; }
+.graph-label.hub { font-size: 13px; fill: #ffffff; }
+.graph-node { cursor: pointer; outline: none; transition: opacity 0.2s ease; }
+.graph-node:focus-visible circle:first-of-type { stroke: #ffffff; stroke-width: 2.5px; stroke-opacity: 1; }
+.graph-edge-hit { cursor: pointer; pointer-events: stroke; }
+.graph-help { font-size: 0.82rem; margin: 0.35rem 0 0; }
+.graph-detail { margin-top: 0.6rem; padding: 0.6rem 0.75rem; border-radius: 8px; background: #0f1d2b; color: #e6eef7;
+  box-shadow: 0 6px 18px rgba(11, 21, 32, 0.25); }
+.graph-detail .muted { color: #a9bccf; }
+.graph-detail p { margin: 0.35rem 0; }
+.graph-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.graph-detail .link { color: #9fd0ff; }
+.graph-detail table { color: #1c1915; }
+.pill { display: inline-block; padding: 0.1rem 0.55rem; border: 2px solid; border-radius: 999px; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .graph-node { transition: none; } }

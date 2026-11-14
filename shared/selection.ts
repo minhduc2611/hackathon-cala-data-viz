@@ -1,10 +1,17 @@
 import type { Board } from "./types.ts";
 
-/** A temporary selection: one bar of the chart at board index `step`. Never saved. */
+/** A temporary selection: one or more bars of the chart at board index `step`. Never saved. */
 export interface Selection {
   step: number;
-  label: string;
+  labels: string[];
 }
+
+/** Values joined for an "is one of" filter. Must match ONE_OF_SEP in the engine. */
+export const joinValues = (labels: string[]) => labels.join(" | ");
+
+/** "location = Oslo" or "location is one of Oslo, Turku": for banners and tags. */
+export const describeSelection = (column: string, labels: string[]) =>
+  labels.length === 1 ? `${column} = ${labels[0]}` : `${column} is one of ${labels.join(", ")}`;
 
 /**
  * Where a selection on the chart at board index `index` filters the path.

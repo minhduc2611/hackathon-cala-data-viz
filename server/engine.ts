@@ -1,9 +1,14 @@
 // The board engine: {{params}}, number parsing and running a path of cells.
-import { selectionAt, type Selection } from "../shared/selection.ts";
-import { DEFAULTS, FIELDS, type Board, type Row, type Step, type Template } from "../shared/types.ts";
+import { describeSelection, joinValues, selectionAt, type Selection } from "../shared/selection.ts";
+import { DEFAULTS, FIELDS, type Board, type GraphData, type Row, type Step, type Template } from "../shared/types.ts";
 
 export const ROW_CAP = 200;
 export const CHART_CAP = 50;
+export const GRAPH_CAP = 300; // edges; more than this is unreadable as a drawing
+const EDGE_SAMPLE = 3; // rows kept per edge for the edge-detail panel
+// shortcut: "is one of" values are joined with " | ", so a value containing " | " cannot be matched.
+// Upgrade to a list-valued board field if Cala values ever contain it.
+export const ONE_OF_SEP = " | ";
 const PARAM = /\{\{\s*(\w+)\s*\}\}/g;
 const NUMBER = /(-?\d[\d,]*(?:\.\d+)?)(?:\s*[–-]\s*\d[\d,]*(?:\.\d+)?)?(?:\s*(thousand|million|billion|trillion|bn|mn|[KMBT])\b)?/i;
 const SCALE: Record<string, number> = {
@@ -71,20 +76,20 @@ export async function runWithSelection(
 ): Promise<{ steps: Step[]; rows: Row[] }> {
   const full = await runPath(start, boards, params, fetch);
   const chart = selection && boards[selection.step];
-  if (!selection || chart?.type !== "chart" || !full.steps[selection.step].chart) return full;
+  if (!selection?.labels.length || chart?.type !== "chart" || !full.steps[selection.step].chart) return full;
   const column = chart.x;
-  const value = selection.label;
+  const picked = new Set(selection.labels.map((l) => l.trim().toLowerCase()));
   // Filter positions (board indices to insert before): the chart's own section, plus every later
   // section (a query cell) whose rows have the same column and contain the selected value, like a
   // dashboard cross-filter. Sections without that value stay as they are instead of going empty.
   const inserts = new Set([selectionAt(boards, selection.step)]);
   boards.forEach((b, q) => {
     const rows = full.steps[q].rows;
-    if (q > selection.step && b.type === "query" && rows.some((r) => (r[column] ?? "").trim().toLowerCase() === value.trim().toLowerCase())) {
+    if (q > selection.step && b.type === "query" && rows.some((r) => picked.has((r[column] ?? "").trim().toLowerCase()))) {
       inserts.add(q + 1);
     }
   });
-  const filter: Board = { type: "filter", column, op: "=", value };
+  const filter: Board = { type: "filter", column, op: "is one of", value: joinValues(selection.labels) };
   const withFilters: Board[] = [];
   const newIndex: number[] = [];
   boards.forEach((b, i) => {
@@ -95,7 +100,7 @@ export async function runWithSelection(
   if (inserts.has(boards.length)) withFilters.push(filter);
   const narrowed = await runPath(start, withFilters, params, fetch);
 
-  const label = `${column} = ${value}`;
+  const label = describeSelection(column, selection.labels);
   let narrowing = true; // the chart's own section is narrowed; later sections only where a filter went in
   const below = boards.slice(selection.step + 1).map((b, offset) => {
     const i = selection.step + 1 + offset;
@@ -105,7 +110,7 @@ export async function runWithSelection(
     if (narrowing && b.type === "query") step.selection = `${label} (applied below)`;
     return step;
   });
-  full.steps[selection.step].chart!.selected = value;
+  full.steps[selection.step].chart!.selected = selection.labels;
   return { steps: [...full.steps.slice(0, selection.step + 1), ...below], rows: narrowed.rows };
 }
 
@@ -149,11 +154,14 @@ export async function runPath(
         else rows = rows.filter((r) => { const n = num(r[column]); return n !== null && NUMERIC[op](n, target); });
       } else {
         const want = value.toLowerCase();
+        const anyOf = new Set(want.split(ONE_OF_SEP).map((v) => v.trim()));
         const test = ({
           "=": (have: string) => have === want,
           "!=": (have: string) => have !== want,
           contains: (have: string) => have.includes(want),
           "not contains": (have: string) => !have.includes(want),
+          "is one of": (have: string) => anyOf.has(have),
+          "is not one of": (have: string) => !anyOf.has(have),
         } as Record<string, (have: string) => boolean>)[op];
         if (!test) step.error = `Unknown operator "${op}".`;
         else rows = rows.filter((r) => test((r[column] ?? "").trim().toLowerCase()));
@@ -233,6 +241,35 @@ export async function runPath(
           );
         }
       } else step.error = `Unknown test "${test}". Use sum, max or contains.`;
+    } else if (board.type === "graph") {
+      // Rows to a network: one edge per (source, target) pair, weighted by how many rows share it.
+      const { source = "", target = "" } = board;
+      step.error = missing(source, cols) || missing(target, cols);
+      if (!step.error) {
+        const pairs = new Map<string, GraphData["edges"][number]>();
+        for (const r of rows) {
+          const s = (r[source] ?? "").trim();
+          const t = (r[target] ?? "").trim();
+          if (!s || !t) continue;
+          const key = `${s}\u0000${t}`;
+          const edge = pairs.get(key) ?? { source: `s:${s}`, target: `t:${t}`, weight: 0, rows: [] };
+          edge.weight++;
+          if (edge.rows.length < EDGE_SAMPLE) edge.rows.push(r);
+          pairs.set(key, edge);
+        }
+        let edges = [...pairs.values()].sort((a, b) => b.weight - a.weight);
+        if (edges.length > GRAPH_CAP) {
+          step.info = `Showing the ${GRAPH_CAP} strongest of ${edges.length} connections.`;
+          edges = edges.slice(0, GRAPH_CAP);
+        }
+        const degree = new Map<string, number>();
+        for (const e of edges) for (const id of [e.source, e.target]) degree.set(id, (degree.get(id) ?? 0) + 1);
+        const nodes = [...degree].map(([id, d]) => ({
+          id, name: id.slice(2), side: id.startsWith("s:") ? ("source" as const) : ("target" as const), degree: d,
+        }));
+        if (!edges.length) step.info = `No rows have both ${source} and ${target}.`;
+        else step.graph = { source, target, nodes, edges };
+      }
     } else if (board.type === "chart") {
       const { x = "", y = "" } = board;
       step.error = missing(x, cols) || missing(y, cols);

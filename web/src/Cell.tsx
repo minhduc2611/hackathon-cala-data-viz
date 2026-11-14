@@ -1,8 +1,9 @@
 import { useId, useState } from "react";
-import type { Selection } from "../../shared/selection.ts";
+import { joinValues, type Selection } from "../../shared/selection.ts";
 import { FIELDS, OPS, TESTS, type Board, type Row, type Run, type Step } from "../../shared/types.ts";
 import { ChartView } from "./ChartView.tsx";
 import { drill } from "./drill.ts";
+import { GraphView } from "./GraphView.tsx";
 import { QueryBox } from "./QueryBox.tsx";
 import { Table } from "./Table.tsx";
 import { Verdict } from "./Verdict.tsx";
@@ -10,11 +11,11 @@ import { Verdict } from "./Verdict.tsx";
 const LABELS: Record<string, string> = {
   column: "Column", op: "Op", value: "Value", group: "Group by", fn: "Function", metric: "Metric column",
   kind: "Type", x: "X column", y: "Y column", text: "Note", other: "Join with source", on: "On column",
-  name: "Source name", query: "Cala query", sep: "Separator", order: "Order",
+  name: "Source name", query: "Cala query", sep: "Separator", order: "Order", source: "From column", target: "To column",
   claim: "Claim", test: "Test", tolerance: "Tolerance %",
 };
 const CHOICES: Record<string, readonly string[]> = { op: OPS, fn: ["count", "sum", "avg"], kind: ["bar", "line"], order: ["desc", "asc"], test: TESTS };
-const COLUMN_FIELDS = new Set(["column", "group", "metric", "x", "y", "on"]);
+const COLUMN_FIELDS = new Set(["column", "group", "metric", "x", "y", "on", "source", "target"]);
 const columnsOf = (rows: Row[]) => [...new Set(rows.flatMap((r) => Object.keys(r)))];
 
 interface Props {
@@ -73,6 +74,7 @@ export function Cell({ number, step, run, busy, onSave, onDelete, onInsert, onSe
       {step.selection && <p className="selected-tag">Showing only {step.selection} (interactive selection)</p>}
       {step.chart && <ChartTabs step={step} run={run} index={number - 2} onSelect={onSelect} onFilter={busy ? undefined : onInsert} />}
       {step.check && <Verdict check={step.check} />}
+      {step.graph && <GraphView graph={step.graph} />}
       {type === "note" && step.text && <p className="story">{step.text}</p>}
     </section>
   );
@@ -89,9 +91,17 @@ interface ChartTabsProps {
 export function ChartTabs({ step, run, index, onSelect, onFilter }: ChartTabsProps) {
   const uid = useId();
   const [tab, setTab] = useState<"chart" | "table">("chart");
-  const picked = step.chart!.selected ?? "";
-  const setPicked = (label: string) => onSelect(label && label !== picked ? { step: index, label } : null);
-  const detail = picked ? drill(run, index, picked) : null;
+  const picked = step.chart!.selected ?? [];
+  // Plain click: select only this bar (click it again to clear). Shift / Cmd / Ctrl click: add or remove it.
+  const setPicked = (label: string, add: boolean) => {
+    const next = add
+      ? picked.includes(label) ? picked.filter((l) => l !== label) : [...picked, label]
+      : picked.length === 1 && picked[0] === label ? [] : [label];
+    onSelect(next.length ? { step: index, labels: next } : null);
+  };
+  const detail = picked.length ? drill(run, index, picked) : null;
+  const pickedText = picked.map((l) => `“${l}”`).join(", ");
+  const filterValue = picked.length === 1 ? picked[0] : joinValues(picked);
   const tabs = ["chart", "table"] as const;
   const keyNav = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -118,16 +128,23 @@ export function ChartTabs({ step, run, index, onSelect, onFilter }: ChartTabsPro
         <Table rows={step.rows} columns={step.outColumns} total={step.rowCount} />
       </div>
       {detail && (
-        <div className="drill" role="region" aria-label={`Rows behind ${picked}`}>
+        <div className="drill" role="region" aria-label={`Rows behind ${pickedText}`}>
           <div className="drill-head">
-            <strong>{detail.rows.length} row{detail.rows.length === 1 ? "" : "s"} behind “{picked}”</strong>
+            <strong>{detail.rows.length} row{detail.rows.length === 1 ? "" : "s"} behind {pickedText}</strong>
             <span>
               {onFilter && (
                 <>
-                  <button type="button" onClick={() => onFilter({ type: "filter", column: detail.column, op: "=", value: picked }, detail.insertAt)}>
+                  <button
+                    type="button"
+                    onClick={() => onFilter({ type: "filter", column: detail.column, op: picked.length === 1 ? "=" : "is one of", value: filterValue }, detail.insertAt)}
+                  >
                     Keep only
                   </button>{" "}
-                  <button type="button" className="quiet" onClick={() => onFilter({ type: "filter", column: detail.column, op: "!=", value: picked }, detail.insertAt)}>
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => onFilter({ type: "filter", column: detail.column, op: picked.length === 1 ? "!=" : "is not one of", value: filterValue }, detail.insertAt)}
+                  >
                     Remove
                   </button>{" "}
                 </>

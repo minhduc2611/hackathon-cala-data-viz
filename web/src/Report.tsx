@@ -4,6 +4,7 @@ import type { Analysis, Board } from "../../shared/types.ts";
 import { api } from "./api.ts";
 import { ChartTabs } from "./Cell.tsx";
 import { Table } from "./Table.tsx";
+import { GraphView } from "./GraphView.tsx";
 import { Verdict } from "./Verdict.tsx";
 
 const fill = (text: string, params: Record<string, string>) =>
@@ -130,7 +131,8 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
       {selection && data.run.steps[selection.step]?.chart?.selected && (
         <div className="selection-bar" role="status">
           <span>
-            Selected <b>{selection.label}</b> in cell {selection.step + 2}. Charts and tables below it show only that.
+            Selected <b>{selection.labels.join(", ")}</b> in cell {selection.step + 2}. Charts and tables below it show only that.
+            {selection.labels.length === 1 && <span className="muted"> Shift- or ⌘-click to add more.</span>}
           </span>
           <button type="button" className="quiet" onClick={() => select(null)} disabled={busy}>Clear selection</button>
         </div>
@@ -142,6 +144,16 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
           return (
             <section className="board" key={i} aria-label={`Claim check: ${step.check.claim}`}>
               <Verdict check={step.check} />
+            </section>
+          );
+        }
+        if (step.graph) {
+          return (
+            <section className="board" key={i}>
+              <h2>{`${step.graph.source} ↔ ${step.graph.target} network`.replaceAll("_", " ")} {cell}</h2>
+              {step.selection && <p className="selected-tag">Showing only {step.selection}</p>}
+              {step.info && <p className="muted">{step.info}</p>}
+              <GraphView graph={step.graph} />
             </section>
           );
         }
