@@ -98,7 +98,7 @@ async function runTool(templateId: string, name: string, input: Json): Promise<J
     if (input.entity_type) args.entity_types = [input.entity_type];
     return (await calaTool("entity_search", args)) as Json;
   }
-  const t = load(templateId);
+  const t = await load(templateId);
   if (name === "set_main_query") {
     if (typeof input.query === "string") t.query = input.query.trim();
     if (typeof input.name === "string" && input.name.trim()) t.name = input.name.trim();
@@ -116,7 +116,7 @@ async function runTool(templateId: string, name: string, input: Json): Promise<J
   } else if (name !== "get_analysis") {
     throw new Error(`Unknown tool ${name}.`);
   }
-  if (name !== "get_analysis") save(t);
+  if (name !== "get_analysis") await save(t);
   return summary(await analyse(t));
 }
 
@@ -128,7 +128,7 @@ export function resetChat(templateId: string): void {
 }
 
 export async function chat(templateId: string, text: string): Promise<{ reply: string; actions: ChatAction[] }> {
-  load(templateId); // 404 before spending a Claude call
+  await load(templateId); // 404 before spending a Claude call
   const client = new Anthropic();
   const history = histories.get(templateId) ?? [];
   const messages: BetaMessageParam[] = [...history, { role: "user", content: text }];

@@ -45,14 +45,14 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   if (parts[0] === "suggestions" && method === "GET") return suggestions();
   if (parts[0] !== "templates") throw new NotFound(url.pathname);
   if (parts.length === 1) {
-    if (method === "GET") return list().map(({ id, name, query }) => ({ id, name, query }));
-    if (method === "POST") return analyse(create(String((await body(req)).name ?? "")));
+    if (method === "GET") return (await list()).map(({ id, name, query }) => ({ id, name, query }));
+    if (method === "POST") return analyse(await create(String((await body(req)).name ?? "")));
   }
   if (parts.length === 2 && method === "DELETE") {
-    remove(parts[1]);
+    await remove(parts[1]);
     return {};
   }
-  const t = load(parts[1] ?? "");
+  const t = await load(parts[1] ?? "");
   const [, , sub, index] = parts;
   if (!sub && method === "GET") return analyse(t);
   if (!sub && method === "PUT") {
@@ -60,7 +60,7 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     if (typeof b.name === "string" && b.name.trim()) t.name = b.name.trim();
     if (typeof b.query === "string") t.query = b.query.trim();
     Object.assign(t.params, cleanParams(b.params));
-    return analyse(save(t));
+    return analyse(await save(t));
   }
   if (sub === "run" && method === "POST") {
     // Report view: run with other parameter values without saving them.
@@ -74,20 +74,20 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   if (sub === "boards") {
     if (index === undefined && method === "POST") {
       t.boards.push(cleanBoard(await body(req)));
-      return analyse(save(t));
+      return analyse(await save(t));
     }
     const i = boardIndex(t, index ?? "");
     if (method === "PUT") t.boards[i] = cleanBoard({ ...(await body(req)), type: t.boards[i].type });
     else if (method === "DELETE") t.boards.splice(i, 1);
     else throw new NotFound(url.pathname);
-    return analyse(save(t));
+    return analyse(await save(t));
   }
   if (sub === "chat" && method === "POST") {
     const message = String((await body(req)).message ?? "").trim();
     if (!message) throw new BadRequest("Write a message.");
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
     const result = await chat(t.id, message);
-    return { ...result, analysis: await analyse(load(t.id)) };
+    return { ...result, analysis: await analyse(await load(t.id)) };
   }
   if (sub === "chat" && method === "DELETE") {
     resetChat(t.id);

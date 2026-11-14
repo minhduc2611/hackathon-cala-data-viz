@@ -1,48 +1,45 @@
-// Templates on disk, running a template, and the query-box suggestions.
+// Templates in MongoDB, running a template, and the query-box suggestions.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Analysis, Suggestions, Template } from "../shared/types.ts";
 import { CACHE, CalaError, cachedQueryFiles, forgetQuery, queryRows } from "./cala.ts";
+import { templates, toTemplate } from "./db.ts";
 import { ROW_CAP, columns, fill, paramNames, runPath, unset } from "./engine.ts";
-import { ROOT } from "./env.ts";
 
-const SAVED = join(ROOT, "saved");
 // Field names from Cala's own examples. Cala has no field schema to fetch.
 const BASE_FIELDS = ["name", "industry", "founded_year", "role", "company", "investors", "series", "founders"];
 
 export class NotFound extends Error {}
 
-function path(id: string): string {
-  // The id comes from the URL and becomes a file name.
+function checkId(id: string): string {
+  // The id comes from the URL; anything else is a 404 before it reaches the database.
   if (!/^[a-z0-9-]+$/.test(id)) throw new NotFound(id);
-  return join(SAVED, id + ".json");
+  return id;
 }
 
-export function load(id: string): Template {
-  const file = path(id);
-  if (!existsSync(file)) throw new NotFound(id);
-  return JSON.parse(readFileSync(file, "utf8"));
+export async function load(id: string): Promise<Template> {
+  const doc = await (await templates()).findOne({ _id: checkId(id) });
+  if (!doc) throw new NotFound(id);
+  return toTemplate(doc);
 }
 
-export function save(template: Template): Template {
-  mkdirSync(SAVED, { recursive: true });
-  writeFileSync(path(template.id), JSON.stringify(template, null, 2) + "\n");
+export async function save(template: Template): Promise<Template> {
+  const { id, ...rest } = template;
+  await (await templates()).replaceOne({ _id: checkId(id) }, { ...rest, id }, { upsert: true });
   return template;
 }
 
-export function remove(id: string): void {
-  const file = path(id);
-  if (!existsSync(file)) throw new NotFound(id);
-  unlinkSync(file);
+export async function remove(id: string): Promise<void> {
+  const { deletedCount } = await (await templates()).deleteOne({ _id: checkId(id) });
+  if (!deletedCount) throw new NotFound(id);
 }
 
-export function list(): Template[] {
-  if (!existsSync(SAVED)) return [];
-  return readdirSync(SAVED).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(readFileSync(join(SAVED, f), "utf8")));
+export async function list(): Promise<Template[]> {
+  return (await (await templates()).find().sort({ _id: 1 }).toArray()).map(toTemplate);
 }
 
-export function create(name: string): Template {
+export function create(name: string): Promise<Template> {
   return save({ id: randomBytes(4).toString("hex"), name: name.trim() || "Untitled", query: "", params: {}, boards: [] });
 }
 
