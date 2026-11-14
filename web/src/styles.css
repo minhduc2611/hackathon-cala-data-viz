@@ -141,3 +141,13 @@ th { color: #5b665b; font-size: .8rem; }
 .deck summary { cursor: pointer; font-weight: 600; }
 .deck textarea { margin: 0.4rem 0; }
 .params small { color: #5c564e; font-size: 0.78rem; max-width: 16rem; }
+
+/* Drill-down */
+.drill { margin-top: 0.6rem; padding: 0.6rem 0.7rem; border: 1px solid #c9c0b2; background: #fbfaf6; }
+.drill-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.drill p { margin: 0.3rem 0; }
+
+/* Interactive selection */
+.selection-bar { position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 0.8rem;
+  flex-wrap: wrap; padding: 0.5rem 0.8rem; margin: 0.5rem 0; background: #eef3f8; border: 1px solid #9db4cc; }
+.selected-tag { display: inline-block; margin: 0 0 0.4rem; padding: 0.15rem 0.5rem; font-size: 0.85rem; background: #eef3f8; border: 1px solid #9db4cc; }

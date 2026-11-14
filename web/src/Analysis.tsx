@@ -92,9 +92,12 @@ export function Analysis({ id }: { id: string }) {
           key={i + JSON.stringify(step.board)}
           number={i + 2}
           step={step}
+          run={run}
           busy={busy}
           onSave={(board) => act(() => api.saveBoard(id, i, board))}
           onDelete={() => act(() => api.deleteBoard(id, i))}
+          onInsert={(board, at) => act(() => api.addBoard(id, board, at))}
+          onSelect={(sel) => act(() => api.play(id, data.template.params, sel))}
         />
       ))}
 

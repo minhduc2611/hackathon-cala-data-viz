@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Board, Row } from "../shared/types.ts";
-import { cleanBoard, fill, num, paramNames, runPath } from "./engine.ts";
+import { drill } from "../web/src/drill.ts";
+import { cleanBoard, fill, num, paramNames, runPath, runWithSelection } from "./engine.ts";
 
 const rows: Row[] = [
   { name: "A", city: "Oslo", funding: "10M" },
@@ -110,6 +111,70 @@ test("check compares claims with sourced rows", async () => {
   assert.deepEqual(r.steps.map((s) => s.check?.verdict), ["matches", "differs", "matches", "not in sources", "no claim"]);
   assert.match(r.steps[1].check!.detail, /70% below the claimed \$100M/);
   assert.equal(r.rows, rounds); // checks never change rows
+});
+
+test("drill-down finds the rows behind a bar and where a filter goes", async () => {
+  const main: Row[] = [{ name: "A", city: "Oslo" }, { name: "B", city: "Oslo" }, { name: "C", city: "Turku" }];
+  const viaAggregate = await runPath(main, [
+    { type: "aggregate", group: "city", metric: "", fn: "count" },
+    { type: "chart", kind: "bar", x: "city", y: "count" },
+  ], {}, none);
+  const run = { resolved: "", error: "", rows: main, rowCount: 3, columns: ["name", "city"], steps: viaAggregate.steps };
+  const d = drill(run, 1, "Oslo");
+  assert.deepEqual(d.rows.map((r) => r.name), ["A", "B"]); // the companies behind "Oslo: 2", not the count row
+  assert.equal(d.insertAt, 0); // filter goes before the aggregate
+  const direct = await runPath(main, [{ type: "chart", kind: "bar", x: "name", y: "name" }], {}, none);
+  const d2 = drill({ ...run, steps: direct.steps }, 0, "C");
+  assert.deepEqual(d2.rows, [{ name: "C", city: "Turku" }]);
+  assert.equal(d2.insertAt, 1); // no aggregate: filter goes after the chart
+});
+
+test("a selection narrows only the cells below the chart", async () => {
+  const main: Row[] = [
+    { name: "A", city: "Oslo", funding: "10M" },
+    { name: "B", city: "Oslo", funding: "5M" },
+    { name: "C", city: "Turku", funding: "2M" },
+  ];
+  const boards: Board[] = [
+    { type: "aggregate", group: "city", metric: "", fn: "count" }, // cell 2
+    { type: "chart", kind: "bar", x: "city", y: "count" }, // cell 3: the user clicks "Oslo"
+    { type: "query", name: "other", query: "x" }, // a new source: not narrowed
+  ];
+  const plain = await runWithSelection(main, boards.slice(0, 2), {}, none);
+  assert.equal(plain.steps[1].chart?.selected, undefined);
+  const path: Board[] = [
+    ...boards.slice(0, 2),
+    { type: "sort", column: "count", order: "desc" }, // cell 4: below the chart, sees the selection
+    boards[2],
+  ];
+  // The aggregate above the chart is the selection point, so cell 4 sees Oslo's aggregate row only.
+  const r = await runWithSelection(main, path, {}, async () => [{ x: "1" }], { step: 1, label: "Oslo" });
+  assert.deepEqual(r.steps[1].chart?.labels, ["Oslo", "Turku"]); // the clicked chart keeps every bar
+  assert.equal(r.steps[1].chart?.selected, "Oslo");
+  assert.deepEqual(r.steps[2].rows, [{ city: "Oslo", count: "2" }]);
+  assert.equal(r.steps[2].selection, "city = Oslo");
+  assert.equal(r.steps[3].selection, undefined); // the new query source has no "city" column: not narrowed
+  assert.equal(r.steps.length, path.length); // the inserted filter is not shown as a cell
+});
+
+test("a selection cross-filters a later section that has the same value", async () => {
+  const main: Row[] = [{ year: "2016", price: "1B" }, { year: "2020", price: "2B" }];
+  const rival: Row[] = [{ year: "2016", deal: "X" }, { year: "2016", deal: "Y" }, { year: "2021", deal: "Z" }];
+  const other: Row[] = [{ year: "1999", deal: "Q" }];
+  const path: Board[] = [
+    { type: "chart", kind: "bar", x: "year", y: "price" }, // click 2016
+    { type: "query", name: "rival", query: "rival" }, // has 2016: narrowed
+    { type: "sort", column: "deal", order: "asc" },
+    { type: "query", name: "other", query: "other" }, // no 2016: left alone
+    { type: "sort", column: "deal", order: "asc" },
+  ];
+  const fetch = async (q: string) => (q === "rival" ? rival : other);
+  const r = await runWithSelection(main, path, {}, fetch, { step: 0, label: "2016" });
+  assert.deepEqual(r.steps[2].rows.map((x) => x.deal), ["X", "Y"]);
+  assert.equal(r.steps[2].selection, "year = 2016");
+  assert.deepEqual(r.steps[4].rows, other);
+  assert.equal(r.steps[4].selection, undefined);
+  assert.equal(r.steps.length, path.length);
 });
 
 test("cleanBoard keeps only the type's fields", () => {

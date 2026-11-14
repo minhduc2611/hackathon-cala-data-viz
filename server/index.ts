@@ -70,7 +70,13 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (sub === "run" && method === "POST") {
     // Report view: run with other parameter values without saving them.
-    const run = await analyse({ ...t, params: { ...t.params, ...cleanParams((await body(req)).params) } });
+    const b = await body(req);
+    // Optional interactive selection: one bar of a chart cell, applied to the cells below it.
+    const s = b.selection;
+    const selection = s && Number.isInteger(s.step) && typeof s.label === "string" && s.step >= 0 && s.step < t.boards.length
+      ? { step: s.step as number, label: s.label as string }
+      : undefined;
+    const run = await analyse({ ...t, params: { ...t.params, ...cleanParams(b.params) } }, selection);
     return { ...run, savedParams: t.params };
   }
   if (sub === "extract" && method === "POST") {
@@ -85,7 +91,10 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (sub === "boards") {
     if (index === undefined && method === "POST") {
-      t.boards.push(cleanBoard(await body(req)));
+      const b = await body(req);
+      // Optional `at` (board index) inserts there, e.g. a drill-down filter before an aggregate; default appends.
+      const at = Number.isInteger(b.at) ? Math.min(Math.max(b.at, 0), t.boards.length) : t.boards.length;
+      t.boards.splice(at, 0, cleanBoard(b));
       return analyse(await save(t));
     }
     const i = boardIndex(t, index ?? "");

@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
-import { FIELDS, OPS, TESTS, type Board, type Step } from "../../shared/types.ts";
+import type { Selection } from "../../shared/selection.ts";
+import { FIELDS, OPS, TESTS, type Board, type Row, type Run, type Step } from "../../shared/types.ts";
 import { ChartView } from "./ChartView.tsx";
+import { drill } from "./drill.ts";
 import { QueryBox } from "./QueryBox.tsx";
 import { Table } from "./Table.tsx";
 import { Verdict } from "./Verdict.tsx";
@@ -13,16 +15,20 @@ const LABELS: Record<string, string> = {
 };
 const CHOICES: Record<string, readonly string[]> = { op: OPS, fn: ["count", "sum", "avg"], kind: ["bar", "line"], order: ["desc", "asc"], test: TESTS };
 const COLUMN_FIELDS = new Set(["column", "group", "metric", "x", "y", "on"]);
+const columnsOf = (rows: Row[]) => [...new Set(rows.flatMap((r) => Object.keys(r)))];
 
 interface Props {
   number: number;
   step: Step;
+  run: Run;
   busy: boolean;
   onSave: (board: Board) => void;
   onDelete: () => void;
+  onInsert: (board: Board, at: number) => void;
+  onSelect: (selection: Selection | null) => void;
 }
 
-export function Cell({ number, step, busy, onSave, onDelete }: Props) {
+export function Cell({ number, step, run, busy, onSave, onDelete, onInsert, onSelect }: Props) {
   const uid = useId();
   const [board, setBoard] = useState<Board>(step.board);
   const set = (field: string, value: string) => setBoard({ ...board, [field]: value });
@@ -64,16 +70,28 @@ export function Cell({ number, step, busy, onSave, onDelete }: Props) {
       {step.info && <p className="muted">{step.info}</p>}
       {step.resolved && !step.error && <p className="muted">{step.resolved}</p>}
       {showRows && <Table rows={step.rows} columns={step.outColumns} total={step.rowCount} />}
-      {step.chart && <ChartTabs step={step} />}
+      {step.selection && <p className="selected-tag">Showing only {step.selection} (interactive selection)</p>}
+      {step.chart && <ChartTabs step={step} run={run} index={number - 2} onSelect={onSelect} onFilter={busy ? undefined : onInsert} />}
       {step.check && <Verdict check={step.check} />}
       {type === "note" && step.text && <p className="story">{step.text}</p>}
     </section>
   );
 }
 
-export function ChartTabs({ step }: { step: Step }) {
+interface ChartTabsProps {
+  step: Step;
+  run: Run;
+  index: number; // step index of this chart
+  onSelect: (selection: Selection | null) => void; // interactive selection: re-runs the cells below
+  onFilter?: (board: Board, at: number) => void; // editor only: make the selection a permanent filter
+}
+
+export function ChartTabs({ step, run, index, onSelect, onFilter }: ChartTabsProps) {
   const uid = useId();
   const [tab, setTab] = useState<"chart" | "table">("chart");
+  const picked = step.chart!.selected ?? "";
+  const setPicked = (label: string) => onSelect(label && label !== picked ? { step: index, label } : null);
+  const detail = picked ? drill(run, index, picked) : null;
   const tabs = ["chart", "table"] as const;
   const keyNav = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -94,11 +112,39 @@ export function ChartTabs({ step }: { step: Step }) {
         ))}
       </div>
       <div role="tabpanel" id={`${uid}panel-chart`} aria-labelledby={`${uid}tab-chart`} hidden={tab !== "chart"}>
-        <ChartView chart={step.chart!} label={`${step.chart!.kind} chart of ${step.board.y} by ${step.board.x}`} />
+        <ChartView chart={step.chart!} label={`${step.chart!.kind} chart of ${step.board.y} by ${step.board.x}`} onPick={setPicked} />
       </div>
       <div role="tabpanel" id={`${uid}panel-table`} aria-labelledby={`${uid}tab-table`} hidden={tab !== "table"}>
         <Table rows={step.rows} columns={step.outColumns} total={step.rowCount} />
       </div>
+      {detail && (
+        <div className="drill" role="region" aria-label={`Rows behind ${picked}`}>
+          <div className="drill-head">
+            <strong>{detail.rows.length} row{detail.rows.length === 1 ? "" : "s"} behind “{picked}”</strong>
+            <span>
+              {onFilter && (
+                <>
+                  <button type="button" onClick={() => onFilter({ type: "filter", column: detail.column, op: "=", value: picked }, detail.insertAt)}>
+                    Keep only
+                  </button>{" "}
+                  <button type="button" className="quiet" onClick={() => onFilter({ type: "filter", column: detail.column, op: "!=", value: picked }, detail.insertAt)}>
+                    Remove
+                  </button>{" "}
+                </>
+              )}
+              <button type="button" className="link" onClick={() => onSelect(null)}>Clear selection</button>
+            </span>
+          </div>
+          {onFilter && (
+            <p className="muted">
+              This selection is temporary. Keep only / Remove saves it as a filter on {detail.column} at cell {detail.insertAt + 2}
+              {detail.aggregated ? ", before the aggregate this chart is built from, so every cell below follows it." : ", right after this chart."}
+            </p>
+          )}
+          {detail.capped && <p className="muted">Taken from the first rows shown for the cell above; the full set may hold more.</p>}
+          <Table rows={detail.rows} columns={columnsOf(detail.rows)} total={detail.rows.length} />
+        </div>
+      )}
     </>
   );
 }

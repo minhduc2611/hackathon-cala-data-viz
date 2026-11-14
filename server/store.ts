@@ -2,10 +2,11 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Selection } from "../shared/selection.ts";
 import type { Analysis, Suggestions, Template } from "../shared/types.ts";
 import { CACHE, CalaError, cachedQueryFiles, forgetQuery, queryRows } from "./cala.ts";
 import { templates, toTemplate } from "./db.ts";
-import { ROW_CAP, columns, fill, paramNames, runPath, unset } from "./engine.ts";
+import { ROW_CAP, columns, fill, paramNames, runWithSelection, unset } from "./engine.ts";
 
 // Field names from Cala's own examples. Cala has no field schema to fetch.
 const BASE_FIELDS = ["name", "industry", "founded_year", "role", "company", "investors", "series", "founders"];
@@ -43,7 +44,7 @@ export function create(name: string): Promise<Template> {
   return save({ id: randomBytes(4).toString("hex"), name: name.trim() || "Untitled", query: "", params: {}, boards: [] });
 }
 
-export async function analyse(template: Template): Promise<Analysis> {
+export async function analyse(template: Template, selection?: Selection): Promise<Analysis> {
   // Start every query at once; the path below then reads them from the cache or the in-flight call.
   const queries = [template.query, ...template.boards.filter((b) => b.type === "query").map((b) => b.query)];
   await Promise.allSettled(
@@ -62,7 +63,7 @@ export async function analyse(template: Template): Promise<Analysis> {
       error = err.message;
     }
   }
-  const { steps } = await runPath(rows, template.boards, template.params, queryRows);
+  const { steps } = await runWithSelection(rows, template.boards, template.params, queryRows, selection);
   return {
     template,
     paramNames: paramNames(template),

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { Selection } from "../../shared/selection.ts";
 import type { Analysis, Board } from "../../shared/types.ts";
 import { api } from "./api.ts";
 import { ChartTabs } from "./Cell.tsx";
@@ -30,12 +31,15 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
   const [extracting, setExtracting] = useState(false);
   const [extractNotes, setExtractNotes] = useState("");
 
-  async function run(params: Record<string, string>) {
+  const [selection, setSelection] = useState<Selection | null>(null);
+
+  async function run(params: Record<string, string>, sel: Selection | null = null) {
     setBusy(true);
     setError("");
     try {
-      const next = await api.play(id, params);
+      const next = await api.play(id, params, sel);
       setData(next);
+      setSelection(sel);
       setValues({ ...next.template.params, ...params });
     } catch (err) {
       setError((err as Error).message);
@@ -67,8 +71,11 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
     e.preventDefault();
     // The values live in the link, so a report for other values can be bookmarked or shared.
     history.replaceState(null, "", `#/r/${id}?${new URLSearchParams(values)}`);
-    run(values);
+    run(values); // new values: the old selection may not exist any more
   }
+
+  // Interactive: clicking a bar re-runs the report with that selection applied to everything below it.
+  const select = (sel: Selection | null) => run(data?.template.params ?? values, sel);
 
   if (!data) {
     return (
@@ -120,6 +127,14 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
       {busy && <p className="muted" role="status">Running. New values mean new Cala queries, up to a minute…</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {data.run.error && <p className="error">Main query: {data.run.error}</p>}
+      {selection && data.run.steps[selection.step]?.chart?.selected && (
+        <div className="selection-bar" role="status">
+          <span>
+            Selected <b>{selection.label}</b> in cell {selection.step + 2}. Charts and tables below it show only that.
+          </span>
+          <button type="button" className="quiet" onClick={() => select(null)} disabled={busy}>Clear selection</button>
+        </div>
+      )}
 
       {data.run.steps.map((step, i) => {
         const cell = <span className="muted cellno">cell {i + 2}</span>;
@@ -135,7 +150,8 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
             <section className="board" key={i}>
               <h2>{`${step.board.y} by ${step.board.x}`.replaceAll("_", " ")} {cell}</h2>
               {step.info && <p className="muted">{step.info}</p>}
-              <ChartTabs step={step} />
+              {step.selection && <p className="selected-tag">Showing only {step.selection}</p>}
+              <ChartTabs step={step} run={data.run} index={i} onSelect={select} />
             </section>
           );
         }
@@ -146,6 +162,7 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
           return (
             <section className="board" key={i}>
               <h2>{describe(step.board, params)} {cell}</h2>
+              {step.selection && <p className="selected-tag">Showing only {step.selection}</p>}
               <Table rows={step.rows} columns={step.outColumns} total={step.rowCount} />
             </section>
           );

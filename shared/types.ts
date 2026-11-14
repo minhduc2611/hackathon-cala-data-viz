@@ -40,6 +40,7 @@ export interface ChartData {
   labels: string[];
   values: (number | null)[];
   y: string;
+  selected?: string; // the bar picked as the active selection
 }
 
 export interface CheckResult {
@@ -64,6 +65,7 @@ export interface Step {
   rows: Row[]; // rows out of this cell, capped
   rowCount: number;
   outColumns: string[];
+  selection?: string; // set on cells whose rows are narrowed by the active selection, e.g. 'location = Oslo'
 }
 
 export interface Run {

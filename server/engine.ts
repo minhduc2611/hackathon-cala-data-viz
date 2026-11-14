@@ -1,4 +1,5 @@
 // The board engine: {{params}}, number parsing and running a path of cells.
+import { selectionAt, type Selection } from "../shared/selection.ts";
 import { DEFAULTS, FIELDS, type Board, type Row, type Step, type Template } from "../shared/types.ts";
 
 export const ROW_CAP = 200;
@@ -54,6 +55,58 @@ export function columns(rows: Row[]): string[] {
 function missing(name: string | undefined, cols: string[]): string {
   if (!name) return "Choose a column.";
   return cols.includes(name) ? "" : `Column "${name}" is not in the rows at this step. Board skipped.`;
+}
+
+/**
+ * Run the path with a temporary selection, like clicking a bar in Contour: the selected chart and everything
+ * above it show the full data (with the bar marked), and every cell below runs on the selected rows only.
+ * Implemented as a second run with a filter inserted where `selectionAt` says; the data is cached, so it is cheap.
+ */
+export async function runWithSelection(
+  start: Row[],
+  boards: Board[],
+  params: Record<string, string>,
+  fetch: (query: string) => Promise<Row[]>,
+  selection?: Selection,
+): Promise<{ steps: Step[]; rows: Row[] }> {
+  const full = await runPath(start, boards, params, fetch);
+  const chart = selection && boards[selection.step];
+  if (!selection || chart?.type !== "chart" || !full.steps[selection.step].chart) return full;
+  const column = chart.x;
+  const value = selection.label;
+  // Filter positions (board indices to insert before): the chart's own section, plus every later
+  // section (a query cell) whose rows have the same column and contain the selected value, like a
+  // dashboard cross-filter. Sections without that value stay as they are instead of going empty.
+  const inserts = new Set([selectionAt(boards, selection.step)]);
+  boards.forEach((b, q) => {
+    const rows = full.steps[q].rows;
+    if (q > selection.step && b.type === "query" && rows.some((r) => (r[column] ?? "").trim().toLowerCase() === value.trim().toLowerCase())) {
+      inserts.add(q + 1);
+    }
+  });
+  const filter: Board = { type: "filter", column, op: "=", value };
+  const withFilters: Board[] = [];
+  const newIndex: number[] = [];
+  boards.forEach((b, i) => {
+    if (inserts.has(i)) withFilters.push(filter);
+    newIndex[i] = withFilters.length;
+    withFilters.push(b);
+  });
+  if (inserts.has(boards.length)) withFilters.push(filter);
+  const narrowed = await runPath(start, withFilters, params, fetch);
+
+  const label = `${column} = ${value}`;
+  let narrowing = true; // the chart's own section is narrowed; later sections only where a filter went in
+  const below = boards.slice(selection.step + 1).map((b, offset) => {
+    const i = selection.step + 1 + offset;
+    if (b.type === "query") narrowing = inserts.has(i + 1);
+    const step = narrowed.steps[newIndex[i]];
+    if (narrowing && b.type !== "query") step.selection = label;
+    if (narrowing && b.type === "query") step.selection = `${label} (applied below)`;
+    return step;
+  });
+  full.steps[selection.step].chart!.selected = value;
+  return { steps: [...full.steps.slice(0, selection.step + 1), ...below], rows: narrowed.rows };
 }
 
 /** A board with exactly its type's fields, defaults filled, everything a string. */

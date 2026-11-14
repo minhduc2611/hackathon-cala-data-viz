@@ -9,7 +9,7 @@ import { analyse, load, save } from "./store.ts";
 const MODEL = "claude-opus-5-5";
 const MAX_TURNS = 20;
 
-const SYSTEM = `You help build data analyses in Cala Contour, a notebook-style app over the Cala knowledge graph.
+const SYSTEM = `You help build data analyses in CalaViz, a notebook-style app over the Cala knowledge graph.
 
 An analysis is a path of numbered cells that run top to bottom, each on the rows the cell above produced.
 Cell 1 is the main query (source "main"). Cells 2+ are boards:

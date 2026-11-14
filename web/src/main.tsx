@@ -43,7 +43,7 @@ function Home() {
   return (
     <main className="home">
       <header className="home-header">
-        <a className="brand" href="#/" aria-label="Cala Contour home"><span className="brand-mark">C</span><span>Cala <strong>Contour</strong></span></a>
+        <a className="brand" href="#/" aria-label="CalaViz home"><span className="brand-mark">C</span><span>Cala<strong>Viz</strong></span></a>
         <span className="eyebrow">DATA WORKSPACE</span>
       </header>
       <form className="create-form" onSubmit={create}>
