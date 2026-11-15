@@ -125,14 +125,13 @@ input:focus, textarea:focus { border-color: #6c9e82; }
 .template-title:hover { color: var(--green); }
 .template-info p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: .13rem 0 0; color: var(--muted); font: .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .template-edit { text-decoration: none; font-size: .85rem; font-weight: 600; padding: .35rem .5rem; }
-.template-play { color: var(--green); text-decoration: none; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; width: 32px; height: 32px; font-size: .75rem; }
-.template-play:hover { background: #edf4ee; }
 .template-menu { position: relative; flex: 0 0 auto; }
 .template-menu > summary { list-style: none; cursor: pointer; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 6px; color: #5d685e; font-size: 1.25rem; line-height: 1; }
 .template-menu > summary::-webkit-details-marker { display: none; }
 .template-menu > summary:hover, .template-menu[open] > summary { background: #f3f6f1; color: var(--green); }
 .template-menu-popover { position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); min-width: 168px; padding: .3rem; background: white; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #1c2d201c; }
-.template-menu-popover a, .template-menu-popover button { display: block; width: 100%; box-sizing: border-box; border: 0; border-radius: 5px; padding: .55rem .65rem; text-align: left; text-decoration: none; color: var(--ink); background: white; font: inherit; font-size: .88rem; cursor: pointer; }
+.template-menu-popover a, .template-menu-popover button { display: flex; align-items: center; gap: .5rem; width: 100%; box-sizing: border-box; border: 0; border-radius: 5px; padding: .55rem .65rem; text-align: left; text-decoration: none; color: var(--ink); background: white; font: inherit; font-size: .88rem; cursor: pointer; }
+.template-menu-popover svg { flex: none; }
 .template-menu-popover a:hover, .template-menu-popover button:hover { background: #f3f6f1; color: var(--green); transform: none; }
 .template-menu-popover button { color: #a23c35; }
 .empty-state, .loading-card { text-align: center; padding: 2.7rem 1rem; border: 1px dashed #d4ddd3; border-radius: 10px; color: var(--muted); background: #ffffff80; }

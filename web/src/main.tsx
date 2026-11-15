@@ -15,6 +15,14 @@ function useHash(): string {
   return hash;
 }
 
+function MenuIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
 function Home() {
   const [templates, setTemplates] = useState<Awaited<ReturnType<typeof api.list>> | null>(null);
   const [name, setName] = useState("");
@@ -60,13 +68,12 @@ function Home() {
         {templates && templates.filter((t) => `${t.name} ${t.query}`.toLowerCase().includes(filter.toLowerCase())).map((t) => (
           <article className="template-card" key={t.id}>
             <div className="template-icon" aria-hidden="true">↗</div>
-            <div className="template-info"><a className="template-title" href={`#/a/${t.id}`}>{t.name || t.id}</a><p>{t.query || "No query added yet"}</p></div>
-            <a className="template-play" href={`#/r/${t.id}`} aria-label={`Play ${t.name || t.id}`}>▶</a>
+            <div className="template-info"><a className="template-title" href={`#/r/${t.id}`}>{t.name || t.id}</a><p>{t.query || "No query added yet"}</p></div>
             <details className="template-menu">
               <summary aria-label={`Actions for ${t.name || t.id}`} title="Template actions">⋯</summary>
               <div className="template-menu-popover" role="menu">
-                <a href={`#/a/${t.id}`} role="menuitem">Edit template</a>
-                <button type="button" role="menuitem" onClick={() => removeTemplate(t.id, t.name || t.id)}>Delete template</button>
+                <a href={`#/a/${t.id}`} role="menuitem"><MenuIcon><path d="M9.6 2.4 13.6 6.4 5.2 14.8H1.2V10.8Z" /><path d="M8 4 12 8" /></MenuIcon>Edit template</a>
+                <button type="button" role="menuitem" onClick={() => removeTemplate(t.id, t.name || t.id)}><MenuIcon><path d="M2.5 4.5h11M6 4.5V3h4v1.5M3.6 4.5l.6 8.5h7.6l.6-8.5M6.6 7v4M9.4 7v4" /></MenuIcon>Delete template</button>
               </div>
             </details>
           </article>
