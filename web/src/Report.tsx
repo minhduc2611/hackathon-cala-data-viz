@@ -5,6 +5,7 @@ import { api, cachedView } from "./api.ts";
 import { ChartTabs } from "./Cell.tsx";
 import { Table } from "./Table.tsx";
 import { GraphView } from "./GraphView.tsx";
+import { NoteText } from "./NoteText.tsx";
 import { Verdict } from "./Verdict.tsx";
 
 const fill = (text: string, params: Record<string, string>) =>
@@ -162,7 +163,7 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
                 </p>
               )}
               {step.error && <p className="error">{step.error}</p>}
-              {step.text && <p className="story">{step.text}</p>}
+              {step.text && <NoteText text={step.text} />}
             </section>
           );
         }

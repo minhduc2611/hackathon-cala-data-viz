@@ -5,6 +5,7 @@ import { ChartView } from "./ChartView.tsx";
 import { drill } from "./drill.ts";
 import { GraphView } from "./GraphView.tsx";
 import { Icon } from "./Icon.tsx";
+import { NoteText } from "./NoteText.tsx";
 import { QueryBox } from "./QueryBox.tsx";
 import { Table } from "./Table.tsx";
 import { Verdict } from "./Verdict.tsx";
@@ -129,7 +130,7 @@ export function Cell({ number, step, run, busy, onSave, onDelete, onInsert, onSe
       {step.chart && <ChartTabs step={step} run={run} index={number - 2} onSelect={onSelect} onFilter={busy ? undefined : onInsert} />}
       {step.check && <Verdict check={step.check} />}
       {step.graph && <GraphView graph={step.graph} />}
-      {type === "note" && step.text && <p className="story">{step.text}</p>}
+      {type === "note" && step.text && <NoteText text={step.text} />}
     </section>
   );
 }

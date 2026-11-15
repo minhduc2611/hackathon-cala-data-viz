@@ -249,3 +249,4 @@ th { color: #5b665b; font-size: .8rem; }
 .add-cell-desc { display: block; font-size: 0.8rem; color: #5c564e; line-height: 1.35; }
 .add-cell-menu.up { top: auto; bottom: calc(100% + 0.4rem); }
 @media (max-width: 34rem) { .add-cell-menu { grid-template-columns: 1fr; } }
+.note-label { letter-spacing: 0.03em; }

@@ -140,21 +140,51 @@ async function composeNote(cells: Json[]): Promise<string> {
   if (!cells.some((c) => (c as { rowCount?: number }).rowCount)) return "No rows for these parameters, so there is nothing to add.";
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
   const client = new Anthropic();
+  // Structured output, so every note has the same three parts as the handwritten stories.
+  const schema = {
+    type: "object",
+    properties: {
+      headline: { type: "string", description: "STORY headline: the main finding in one sentence." },
+      points: { type: "array", items: { type: "string" }, description: "2-4 short findings, each with the numbers or names behind it." },
+      beneficiaries: {
+        type: "string",
+        description: "WHO BENEFITS FROM THIS: who gains from this finding (e.g. which kind of fund, founder, acquirer or LP) and why, 1-2 sentences.",
+      },
+      meaning: { type: "string", description: "WHAT IT MEANS: what an investor should do or watch, 1-2 sentences." },
+      trust: { type: "string", description: "TRUST: what in this data not to rely on (gaps, prose figures, small samples), 1-2 sentences." },
+    },
+    required: ["headline", "points", "beneficiaries", "meaning", "trust"],
+    additionalProperties: false,
+  };
   const response = await client.beta.messages.create({
     model: MODEL,
     max_tokens: 1500,
-    output_config: { effort: "low" },
+    output_config: { effort: "low", format: { type: "json_schema", schema } },
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     system: `You write the note under a CalaViz report. The JSON is the cells above this note, already run for the parameters in it.
-Write the story, the insights, and the findings for these parameters. Use only numbers and names that appear in the JSON. If a figure is not there, leave it out.
-Plain prose, no title, under 160 words. End with one sentence on what not to trust.`,
+Write the story, who benefits from it, what it means, and what not to trust for these parameters. Use only numbers and names that appear in the JSON. If a figure is not there, leave it out.
+Under 160 words in total. Refer to cells by number when it helps the reader find a figure.`,
     messages: [{ role: "user", content: JSON.stringify(cells) }],
   });
-  const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-  if (!text) throw new Error("Claude returned an empty note.");
-  return text;
+  if (response.stop_reason === "refusal") throw new Error("Claude declined to write this note.");
+  const raw = response.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  if (!raw) throw new Error("Claude returned an empty note.");
+  const note = JSON.parse(raw) as { headline: string; points: string[]; beneficiaries: string; meaning: string; trust: string };
+  return [
+    `STORY: ${note.headline.trim()}`,
+    ...note.points.map((p) => `- ${p.trim()}`),
+    "",
+    `WHO BENEFITS FROM THIS: ${note.beneficiaries.trim()}`,
+    "",
+    `WHAT IT MEANS: ${note.meaning.trim()}`,
+    "",
+    `TRUST: ${note.trust.trim()}`,
+  ].join("\n");
 }
+
+// Part of every note's fingerprint: bump it when the note format changes, so existing notes rewrite once.
+const NOTE_FORMAT = 3;
 
 /**
  * Rewrite AI notes whose data changed: new parameter values, an edited query or cell above, or a different
@@ -169,7 +199,7 @@ export async function rewriteAiNotes(a: Analysis): Promise<void> {
     const board = a.template.boards[i];
     if (board.ai !== "1") continue;
     const above = cells.filter((c) => c.cell < i + 2 && c.type !== "note");
-    const fingerprint = noteFingerprint(a.template.params, above);
+    const fingerprint = noteFingerprint(a.template.params, { format: NOTE_FORMAT, above });
     if (!aiNoteStale(board, fingerprint)) continue;
     const step = a.run.steps[i];
     const id = `${a.template.id}:${i}:${fingerprint}`;

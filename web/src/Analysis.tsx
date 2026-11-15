@@ -62,16 +62,40 @@ export function Analysis({ id }: { id: string }) {
     e.preventDefault();
     act(() => api.update(id, { name, query, params, paramHints: hints }));
   };
+  const saved = data.template;
+  const unsaved = name !== saved.name || query !== saved.query
+    || JSON.stringify(params) !== JSON.stringify(saved.params) || JSON.stringify(hints) !== JSON.stringify(saved.paramHints ?? {});
+
+  /** "run report": save what is on screen first, so the report runs this version, then open it. */
+  async function openReport(e: React.MouseEvent<HTMLAnchorElement>) {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // new tab or window: plain link
+    e.preventDefault();
+    if (!unsaved) {
+      location.hash = `#/r/${id}`;
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      show(await api.update(id, { name, query, params, paramHints: hints }));
+      location.hash = `#/r/${id}`;
+    } catch (err) {
+      setError(`Not saved, so the report was not opened: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <main aria-busy={busy}>
       <p className="topbar">
         <a href="#/">All templates</a>
-        <a className="play" href={`#/r/${id}`}>
+        <a className="play" href={`#/r/${id}`} onClick={openReport} aria-disabled={busy}
+          title={unsaved ? "Saves your changes, then opens the report" : undefined}>
           <svg className="icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
             <path d="M5 3.2v9.6l8-4.8z" />
           </svg>
-          run report
+          {busy && unsaved ? "Saving…" : unsaved ? "save & run report" : "run report"}
         </a>
       </p>
       <section className="board">
