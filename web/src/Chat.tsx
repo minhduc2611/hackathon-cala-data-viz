@@ -143,7 +143,7 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
         <strong>Cala AI</strong>
         <span>
           <button type="button" className="link" onClick={reset} disabled={working}>New chat</button>{" "}
-          <button type="button" className="link" onClick={() => setOpen(false)} aria-label="Close chat">✕</button>
+          <button type="button" className="link" onClick={() => setOpen(false)} aria-label="Close chat">−</button>
         </span>
       </header>
       <div className="chat-log" ref={log} aria-live="polite">
