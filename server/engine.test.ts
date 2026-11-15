@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Board, Row } from "../shared/types.ts";
 import { drill } from "../web/src/drill.ts";
+import { options, typeAt } from "../web/src/QueryBox.tsx";
 import { cleanBoard, fill, num, paramNames, runPath, runWithSelection } from "./engine.ts";
 
 const rows: Row[] = [
@@ -208,6 +209,24 @@ test("graph turns rows into weighted edges between two columns", async () => {
   assert.equal(r.rows, rows); // a graph does not change rows
   const bad = await runPath(rows, [{ type: "graph", source: "name", target: "nope" }], {}, none);
   assert.match(bad.steps[0].error, /nope/);
+});
+
+test("query box follows relationships to the right entity type", () => {
+  const s = {
+    entities: ["companies", "people"],
+    fields: ["name"],
+    aliases: { companies: "Company", people: "Person" },
+    schema: {
+      Company: { properties: ["legal_name", "website"], relations: [{ word: "founders", rel: "FOUNDED (incoming)", type: "Person" }] },
+      Person: { properties: ["linkedin_url"], relations: [{ word: "education", rel: "STUDIED_AT", type: "Organization" }] },
+    },
+  };
+  assert.equal(typeAt(s, "companies"), "Company");
+  assert.equal(typeAt(s, "companies.industry=fintech.founders"), "Person"); // a filter keeps the type, a relation steps in
+  const afterCompany = options(s, "companies.").items.map((i) => i.text);
+  assert.ok(afterCompany.indexOf("founders") < afterCompany.indexOf("legal_name")); // related entities first
+  assert.deepEqual(options(s, "companies.founders.link").items.map((i) => i.text), ["linkedin_url"]);
+  assert.deepEqual(options(s, "companies.founders.return(link").items.map((i) => i.text), ["linkedin_url"]);
 });
 
 test("cleanBoard keeps only the type's fields", () => {

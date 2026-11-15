@@ -7,6 +7,7 @@ import type { Analysis, Suggestions, Template } from "../shared/types.ts";
 import { CACHE, CalaError, cachedQueryFiles, forgetQuery, queryRows } from "./cala.ts";
 import { templates, toTemplate } from "./db.ts";
 import { ROW_CAP, columns, fill, paramNames, runWithSelection, unset } from "./engine.ts";
+import { entitySchema } from "./schema.ts";
 
 // Field names from Cala's own examples. Cala has no field schema to fetch.
 const BASE_FIELDS = ["name", "industry", "founded_year", "role", "company", "investors", "series", "founders"];
@@ -102,5 +103,8 @@ export async function suggestions(): Promise<Suggestions> {
     const data = JSON.parse(readFileSync(file, "utf8"));
     if (Array.isArray(data)) for (const key of columns(data)) fields.add(key);
   }
-  return { entities: ["companies", "people", ...(entityTypes ?? [])], fields: [...fields] };
+  const schema = await entitySchema();
+  const aliases: Record<string, string> = { companies: "Company", people: "Person", industries: "Industry", countries: "Country" };
+  for (const type of entityTypes ?? []) aliases[type.toLowerCase()] = type;
+  return { entities: ["companies", "people", ...(entityTypes ?? [])], fields: [...fields], schema, aliases };
 }

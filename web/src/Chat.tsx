@@ -24,7 +24,7 @@ function describe(a: ChatAction): string {
   return `${ACTION_LABEL[a.tool] ?? a.tool}${detail ? `: ${String(detail)}` : ""}${a.error ? " (failed)" : ""}`;
 }
 
-/** Chat with Claude, docked bottom right. Claude edits the analysis through tools; the page shows the result. */
+/** Chat with Cala AI, docked bottom right. It edits the analysis through tools; the page shows the result. */
 export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis) => void }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,14 +62,14 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
   if (!open) {
     return (
       <button type="button" className="chat-toggle" onClick={() => setOpen(true)} aria-expanded={false}>
-        Ask Claude
+        Ask Cala AI
       </button>
     );
   }
   return (
-    <aside className="chat" aria-label="Chat with Claude">
+    <aside className="chat" aria-label="Chat with Cala AI">
       <header>
-        <strong>Claude</strong>
+        <strong>Cala AI</strong>
         <span>
           <button type="button" className="link" onClick={reset} disabled={working}>New chat</button>{" "}
           <button type="button" className="link" onClick={() => setOpen(false)} aria-label="Close chat">✕</button>
@@ -77,7 +77,7 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
       </header>
       <div className="chat-log" ref={log} aria-live="polite">
         {messages.length === 0 && (
-          <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Claude runs Cala queries and adds cells for you.</p>
+          <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Cala AI runs queries and adds cells for you.</p>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
@@ -87,14 +87,14 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
             <p>{m.text}</p>
           </div>
         ))}
-        {working && <p className="muted" role="status">Claude is working. New Cala queries take up to a minute each…</p>}
+        {working && <p className="muted" role="status">Cala AI is working. New Cala queries take up to a minute each…</p>}
       </div>
       <form onSubmit={send}>
         <textarea
           rows={2}
           aria-label="Message"
           value={text}
-          placeholder="Ask Claude…"
+          placeholder="Ask Cala AI…"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) send(e); }}
         />

@@ -28,10 +28,6 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
-  const [deck, setDeck] = useState("");
-  const [extracting, setExtracting] = useState(false);
-  const [extractNotes, setExtractNotes] = useState("");
-
   const [selection, setSelection] = useState<Selection | null>(null);
 
   async function run(params: Record<string, string>, sel: Selection | null = null) {
@@ -52,21 +48,6 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
   useEffect(() => {
     run(initial);
   }, [id]);
-
-  async function extract() {
-    setExtracting(true);
-    setExtractNotes("");
-    try {
-      const out = await api.extract(id, deck);
-      // Only fill what the text stated; keep the current value otherwise.
-      setValues((v) => ({ ...v, ...Object.fromEntries(Object.entries(out.params).filter(([, x]) => x)) }));
-      setExtractNotes((out.notes || "Fields filled.") + " Review them, then press Run report.");
-    } catch (err) {
-      setExtractNotes((err as Error).message);
-    } finally {
-      setExtracting(false);
-    }
-  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -101,29 +82,16 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
       <h1>{fill(data.template.name, params)}</h1>
 
       {data.paramNames.length > 0 && (
-        <>
-          <details className="deck">
-            <summary>Fill from a deck</summary>
-            <p className="muted">
-              Paste the deck or memo text. Claude copies the claimed values into the fields below; it does not check them. The checks run on Cala data when you run the report.
-            </p>
-            <textarea rows={6} aria-label="Deck text" value={deck} onChange={(e) => setDeck(e.target.value)} placeholder="Paste deck text…" />
-            <button type="button" className="quiet" disabled={extracting || !deck.trim()} onClick={extract}>
-              {extracting ? "Reading…" : "Fill fields from text"}
-            </button>
-            {extractNotes && <p className="muted" role="status">{extractNotes}</p>}
-          </details>
-          <form className="params" onSubmit={submit}>
-            {data.paramNames.map((p) => (
-              <label key={p}>
-                <span>{p}</span>
-                <input value={values[p] ?? ""} onChange={(e) => setValues({ ...values, [p]: e.target.value })} aria-describedby={hints[p] ? `hint-${p}` : undefined} />
-                {hints[p] && <small id={`hint-${p}`}>{hints[p]}</small>}
-              </label>
-            ))}
-            <button type="submit" disabled={busy}>{busy ? "Running…" : "Run report"}</button>
-          </form>
-        </>
+        <form className="params" onSubmit={submit}>
+          {data.paramNames.map((p) => (
+            <label key={p}>
+              <span className="label-chip">{p}</span>
+              <input value={values[p] ?? ""} onChange={(e) => setValues({ ...values, [p]: e.target.value })} aria-describedby={hints[p] ? `hint-${p}` : undefined} />
+              {hints[p] && <small id={`hint-${p}`}>{hints[p]}</small>}
+            </label>
+          ))}
+          <button type="submit" disabled={busy}>{busy ? "Running…" : "Run report"}</button>
+        </form>
       )}
       {busy && <p className="muted" role="status">Running. New values mean new Cala queries, up to a minute…</p>}
       {error && <p className="error" role="alert">{error}</p>}

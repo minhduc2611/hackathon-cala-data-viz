@@ -8,7 +8,6 @@ import type { Template } from "../shared/types.ts";
 import { chat, resetChat } from "./agent.ts";
 import { dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
-import { extractParams } from "./extract.ts";
 import { ROOT } from "./env.ts";
 import { NotFound, analyse, create, list, load, refresh, remove, save, suggestions } from "./store.ts";
 
@@ -79,12 +78,6 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
       : undefined;
     const run = await analyse({ ...t, params: { ...t.params, ...cleanParams(b.params) } }, selection);
     return { ...run, savedParams: t.params };
-  }
-  if (sub === "extract" && method === "POST") {
-    const text = String((await body(req)).text ?? "").trim();
-    if (!text) throw new BadRequest("Paste the deck text first.");
-    if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
-    return extractParams(t, text);
   }
   if (sub === "refresh" && method === "POST") {
     refresh(t);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { BOARD_TYPES, type Analysis as AnalysisData, type Board, type BoardType } from "../../shared/types.ts";
+import type { Analysis as AnalysisData, Board } from "../../shared/types.ts";
+import { AddCellMenu } from "./AddCellMenu.tsx";
 import { api } from "./api.ts";
 import { Cell } from "./Cell.tsx";
 import { Chat } from "./Chat.tsx";
@@ -47,7 +48,11 @@ export function Analysis({ id }: { id: string }) {
     );
   }
 
-  const { run, paramNames } = data;
+  const { run } = data;
+  // Inputs follow the query box live: a {{variable}} gets its input as you type it, and loses it when deleted.
+  // Variables used in other cells (filter values, notes, query cells) keep theirs.
+  const used = [query, ...data.template.boards.flatMap((b) => [b.query, b.value, b.text])];
+  const paramNames = [...new Set(used.flatMap((t) => [...(t ?? "").matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1])))];
   const run1 = (e: React.FormEvent) => {
     e.preventDefault();
     act(() => api.update(id, { name, query, params }));
@@ -57,21 +62,27 @@ export function Analysis({ id }: { id: string }) {
     <main aria-busy={busy}>
       <p className="topbar">
         <a href="#/">All templates</a>
-        <a className="play" href={`#/r/${id}`}>▶ Play</a>
+        <a className="play" href={`#/r/${id}`}>run report</a>
       </p>
       <section className="board">
         <h3>[1] query · main</h3>
         <form onSubmit={run1}>
           <p><label>Name <input value={name} onChange={(e) => setName(e.target.value)} /></label></p>
-          <label htmlFor="q-main">
-            Cala query. Write {"{{name}}"} for a parameter; it also works in filter values and notes. Chain clauses with a dot:
-            .field=value, .order_by=field DESC, .limit=N, .return(f1, f2). Suggestions are hints, not a full list.
-          </label>
+          <p className="query-help">
+            <label htmlFor="q-main">Cala query</label>
+            <button type="button" className="info">
+              <span aria-hidden="true">i</span>
+              <span className="tip" role="tooltip">
+                Write {"{{name}}"} for a parameter; it also works in filter values and notes. Chain clauses with a dot:
+                .field=value, .order_by=field DESC, .limit=N, .return(f1, f2). Suggestions are hints, not a full list.
+              </span>
+            </button>
+          </p>
           <QueryBox id="q-main" value={query} onChange={setQuery} />
           <p>
             {paramNames.map((p) => (
               <label key={p}>
-                {p} <input value={params[p] ?? ""} onChange={(e) => setParams({ ...params, [p]: e.target.value })} />
+                <span className="label-chip">{p}</span> <input value={params[p] ?? ""} onChange={(e) => setParams({ ...params, [p]: e.target.value })} />
               </label>
             ))}
             <button type="submit" disabled={busy}>Run</button>{" "}
@@ -79,12 +90,7 @@ export function Analysis({ id }: { id: string }) {
           </p>
         </form>
         {run.error && <p className="error">{run.error}</p>}
-        {run.resolved && !run.error && (
-          <>
-            <p className="muted">{run.resolved}</p>
-            <Table rows={run.rows} columns={run.columns} total={run.rowCount} />
-          </>
-        )}
+        {run.resolved && !run.error && <Table rows={run.rows} columns={run.columns} total={run.rowCount} />}
       </section>
 
       {run.steps.map((step, i) => (
@@ -101,14 +107,7 @@ export function Analysis({ id }: { id: string }) {
         />
       ))}
 
-      <p>
-        Add{" "}
-        {BOARD_TYPES.map((type: BoardType) => (
-          <button key={type} type="button" className="quiet" disabled={busy} onClick={() => act(() => api.addBoard(id, { type } as Board))}>
-            {type}
-          </button>
-        ))}
-      </p>
+      <AddCellMenu disabled={busy} onAdd={(type) => act(() => api.addBoard(id, { type } as Board))} />
       {busy && <p className="muted" role="status">Running…</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <Chat id={id} onAnalysis={show} />

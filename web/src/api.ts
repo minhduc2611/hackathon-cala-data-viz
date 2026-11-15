@@ -18,7 +18,6 @@ export const api = {
   deleteTemplate: (id: string) => call<object>("DELETE", `/templates/${id}`),
   get: (id: string) => call<Analysis>("GET", `/templates/${id}`),
   update: (id: string, patch: Partial<Pick<Template, "name" | "query" | "params">>) => call<Analysis>("PUT", `/templates/${id}`, patch),
-  extract: (id: string, text: string) => call<{ params: Record<string, string>; notes: string }>("POST", `/templates/${id}/extract`, { text }),
   play: (id: string, params: Record<string, string>, selection?: Selection | null) =>
     call<Analysis>("POST", `/templates/${id}/run`, { params, selection: selection ?? undefined }),
   refresh: (id: string) => call<Analysis>("POST", `/templates/${id}/refresh`),

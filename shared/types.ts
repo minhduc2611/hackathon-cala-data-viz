@@ -33,7 +33,7 @@ export interface Template {
   query: string;
   params: Record<string, string>;
   boards: Board[];
-  paramHints?: Record<string, string>; // what each parameter means; shown in the report and used by "Fill from deck"
+  paramHints?: Record<string, string>; // what each parameter means; shown under the report fields
 }
 
 export interface ChartData {
@@ -95,9 +95,18 @@ export interface Analysis {
   savedParams?: Record<string, string>; // report runs: the template's own values, which its notes were written for
 }
 
+/** What the query box knows about one entity type, from Cala introspection. */
+export interface EntitySchema {
+  properties: string[];
+  // word to type in the query; type at the other end if known; tested = seen working in a real query
+  relations: { word: string; rel: string; type?: string; tested?: boolean }[];
+}
+
 export interface Suggestions {
   entities: string[];
   fields: string[];
+  schema?: Record<string, EntitySchema>; // by entity type: Company, Person, …
+  aliases?: Record<string, string>; // query start word -> type, e.g. companies -> Company
 }
 
 export interface ChatAction {
