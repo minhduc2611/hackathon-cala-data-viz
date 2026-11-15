@@ -16,11 +16,18 @@ const ACTION_LABEL: Record<string, string> = {
   add_cell: "added a cell",
   update_cell: "updated a cell",
   delete_cell: "deleted a cell",
+  get_cala_skill: "read the Cala skill",
+  cala_call: "called Cala",
+  add_ai_note: "added an AI note",
 };
+
+const BUILD_PROMPT = "Build a report from this query: plan 2-4 sections, add the cells and charts, check them, and finish with an AI note.";
 
 function describe(a: ChatAction): string {
   const input = a.input as Record<string, unknown>;
-  const detail = input.query ?? input.name ?? (input.cell !== undefined ? `cell ${input.cell}` : input.type) ?? "";
+  const args = input.arguments as Record<string, unknown> | undefined;
+  const detail = input.query ?? input.name ?? input.section ?? (input.tool ? `${input.tool}${args?.input ? ` "${args.input}"` : ""}` : undefined)
+    ?? (input.cell !== undefined ? `cell ${input.cell}` : input.type) ?? "";
   return `${ACTION_LABEL[a.tool] ?? a.tool}${detail ? `: ${String(detail)}` : ""}${a.error ? " (failed)" : ""}`;
 }
 
@@ -30,15 +37,26 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [working, setWorking] = useState(false);
+  const [live, setLive] = useState<{ round: number; actions: ChatAction[] }>({ round: 0, actions: [] });
   const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight });
-  }, [messages, working]);
+  }, [messages, working, live]);
 
-  async function send(e: React.FormEvent) {
+  // While Cala AI works (a report can take minutes), show each step as it happens.
+  useEffect(() => {
+    if (!working) return;
+    setLive({ round: 0, actions: [] });
+    const timer = setInterval(() => {
+      api.chatProgress(id).then((p) => { if (p.running) setLive({ round: p.round, actions: p.actions }); }).catch(() => {});
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [working, id]);
+
+  async function send(e: React.FormEvent, preset?: string) {
     e.preventDefault();
-    const message = text.trim();
+    const message = (preset ?? text).trim();
     if (!message || working) return;
     setText("");
     setMessages((m) => [...m, { role: "user", text: message }]);
@@ -77,7 +95,12 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
       </header>
       <div className="chat-log" ref={log} aria-live="polite">
         {messages.length === 0 && (
-          <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Cala AI runs queries and adds cells for you.</p>
+          <>
+            <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Cala AI runs queries and adds cells for you.</p>
+            <button type="button" className="quiet chat-starter" disabled={working} onClick={(e) => send(e, BUILD_PROMPT)}>
+              Build a report from this query
+            </button>
+          </>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
@@ -87,7 +110,14 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
             <p>{m.text}</p>
           </div>
         ))}
-        {working && <p className="muted" role="status">Cala AI is working. New Cala queries take up to a minute each…</p>}
+        {working && (
+          <div className="msg claude" role="status">
+            {live.actions.length > 0 && <ul className="actions">{live.actions.map((a, j) => <li key={j}>{describe(a)}</li>)}</ul>}
+            <p className="muted">
+              Cala AI is working{live.round ? ` (round ${live.round})` : ""}. New Cala queries take up to a minute each…
+            </p>
+          </div>
+        )}
       </div>
       <form onSubmit={send}>
         <textarea

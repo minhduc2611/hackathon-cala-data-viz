@@ -8,3 +8,4 @@ saved/*.json
 npm-debug.log*
 .DS_Store
 .cursor/
+brag-output

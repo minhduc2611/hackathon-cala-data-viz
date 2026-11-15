@@ -49,4 +49,6 @@ export const api = {
   chat: (id: string, message: string) =>
     call<ChatReply>("POST", `/templates/${id}/chat`, { message }).then((r) => (changed(id)(r.analysis), r)),
   resetChat: (id: string) => call<object>("DELETE", `/templates/${id}/chat`),
+  chatProgress: (id: string) =>
+    call<{ running: boolean; round: number; actions: ChatReply["actions"] }>("GET", `/templates/${id}/chat/progress`),
 };

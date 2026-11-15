@@ -2,12 +2,32 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageParam, BetaTool, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { BOARD_TYPES, FIELDS, OPS, type Analysis, type ChatAction, type Template } from "../shared/types.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { calaTool, queryRows } from "./cala.ts";
+import { ROOT } from "./env.ts";
 import { aiNoteStale, cleanBoard, noteFingerprint, paramKey } from "./engine.ts";
 import { analyse, load, save } from "./store.ts";
 
 const MODEL = "claude-opus-5-5";
-const MAX_TURNS = 20;
+const MAX_TURNS = 40; // a whole report takes many rounds: check a query, add cells, read the result, fix, repeat
+
+// Cala's own agent skill (github.com/cala-ai/cala-skill), copied into the app so it ships with the server.
+const SKILL_FILE = join(ROOT, "skills", "cala", "SKILL.md");
+const CALA_TOOLS = ["entity_search", "entity_lookup", "entity_introspection", "entity_retrieval", "knowledge_search"] as const;
+const TOOL_RESULT_CAP = 12_000; // characters of a raw Cala answer passed back; retrievals with sources can be huge
+
+/** The skill without its front matter, or only the "## " sections whose heading contains `section`. */
+function calaSkill(section?: string): string {
+  const body = readFileSync(SKILL_FILE, "utf8").replace(/^---[\s\S]*?\n---\n/, "").trim();
+  if (!section?.trim()) return body;
+  const parts = body.split(/\n(?=## )/);
+  const want = section.trim().toLowerCase();
+  const hits = parts.filter((p) => p.startsWith("## ") && p.split("\n")[0].toLowerCase().includes(want));
+  if (hits.length) return hits.join("\n\n");
+  const names = parts.filter((p) => p.startsWith("## ")).map((p) => p.split("\n")[0].slice(3));
+  throw new Error(`No skill section matching "${section}". Sections: ${names.join(" | ")}.`);
+}
 
 const SYSTEM = `You help build data analyses in CalaViz, a notebook-style app over the Cala knowledge graph.
 
@@ -33,10 +53,22 @@ Every new Cala query takes 15-60 seconds; results are cached, so reuse queries y
 
 How to work:
 - Call get_analysis first to see the current cells, their columns, row counts and errors. The user may have edited it since your last turn.
+- Once per conversation, before writing Cala queries, call get_cala_skill (Cala's own guide: which tool to use,
+  the query language, entity reads, failure rules) and follow it. It overrides the short syntax notes above.
 - Before putting a new query in a cell, run_cala_query it and look at the columns and sample rows.
 - Every edit tool returns the re-run analysis. Check the cell you touched for errors or 0 rows and fix it before you finish.
-- Prefer few, meaningful cells. Add a note cell with the insight when you build a chart.
-- Reply in two or three short sentences: what you changed and what the result shows. Refer to cells by number.`;
+- Prefer few, meaningful cells.
+
+When asked to build or extend a report, work in rounds until it is done:
+1. Plan 2-4 sections, each a question the data can answer (e.g. who leads, how concentrated, who connects to whom).
+2. For each section: check the query with run_cala_query, add the cells (filter / split / aggregate / sort, then a
+   chart or a graph), read the re-run analysis the edit returns, and fix any error, empty cell or unreadable chart.
+   Use cala_call (entity_retrieval, entity_introspection, knowledge_search) when a section needs one entity's
+   relationships or a sourced fact that a query cannot give.
+3. End the report with add_ai_note: it writes STORY / WHO BENEFITS FROM THIS / WHAT IT MEANS / TRUST from the cells.
+4. Stop when every section has a working chart or table and the note is in place, or when Cala fails: then halt
+   and say what failed (the skill's failure rules). Never invent figures.
+- Reply in two or three short sentences: what you built or changed and what the result shows. Refer to cells by number.`;
 
 type Json = Record<string, unknown>;
 
@@ -64,6 +96,14 @@ const TOOLS: BetaTool[] = [
     cell: { type: "integer", minimum: 2 }, ...boardFields,
   }, ["cell"]),
   tool("delete_cell", "Delete a board cell (cell number as shown, 2+).", { cell: { type: "integer", minimum: 2 } }, ["cell"]),
+  tool("get_cala_skill", "Cala's own agent guide: which Cala tool fits a question, the dot-notation query language, entity reads (introspect then retrieve), provenance, and how to fail. Call once before writing queries.", {
+    section: str("Optional: return only sections whose heading contains this, e.g. \"knowledge_query\", \"pick\", \"entities\", \"failure\". Omit for the whole guide."),
+  }),
+  tool("cala_call", "Call one Cala tool directly (cached): entity_search, entity_lookup, entity_introspection, entity_retrieval, knowledge_search. Arguments as in get_cala_skill. Long answers are cut.", {
+    tool: { type: "string", enum: CALA_TOOLS },
+    arguments: { type: "object", description: "The tool's arguments, e.g. {\"entity_id\": \"…\"} or {\"input\": \"…\"}." },
+  }, ["tool", "arguments"]),
+  tool("add_ai_note", "Add an AI note cell at the end. It writes STORY / WHO BENEFITS FROM THIS / WHAT IT MEANS / TRUST from the cells above, and rewrites itself when their data changes.", {}),
 ];
 
 const sample = (rows: Json[], n: number) => rows.slice(0, n);
@@ -100,6 +140,16 @@ async function runTool(templateId: string, name: string, input: Json): Promise<J
     if (input.entity_type) args.entity_types = [input.entity_type];
     return (await calaTool("entity_search", args)) as Json;
   }
+  if (name === "get_cala_skill") return { skill: calaSkill(typeof input.section === "string" ? input.section : undefined) };
+  if (name === "cala_call") {
+    const which = String(input.tool ?? "");
+    if (!(CALA_TOOLS as readonly string[]).includes(which)) throw new Error(`cala_call supports: ${CALA_TOOLS.join(", ")}.`);
+    const args = input.arguments && typeof input.arguments === "object" ? (input.arguments as Json) : {};
+    const text = JSON.stringify(await calaTool(which, args));
+    return text.length > TOOL_RESULT_CAP
+      ? { result: text.slice(0, TOOL_RESULT_CAP), cut: `Answer cut at ${TOOL_RESULT_CAP} of ${text.length} characters; project fewer fields or relationships.` }
+      : { result: JSON.parse(text) };
+  }
   const t = await load(templateId);
   if (name === "set_main_query") {
     if (typeof input.query === "string") t.query = input.query.trim();
@@ -115,6 +165,8 @@ async function runTool(templateId: string, name: string, input: Json): Promise<J
     t.boards[i] = cleanBoard({ ...t.boards[i], ...given, type: t.boards[i].type });
   } else if (name === "delete_cell") {
     t.boards.splice(boardIndex(t, input.cell), 1);
+  } else if (name === "add_ai_note") {
+    t.boards.push({ type: "note", text: "", ai: "1", for: "" }); // the analysis below writes it
   } else if (name !== "get_analysis") {
     throw new Error(`Unknown tool ${name}.`);
   }
@@ -236,13 +288,31 @@ export async function aiNote(templateId: string): Promise<Analysis> {
   return analyse(await save(t));
 }
 
+// What a running chat has done so far, for the chat window to show while it works (a report can take minutes).
+const progress = new Map<string, { round: number; actions: ChatAction[] }>();
+
+export function chatProgress(templateId: string): { running: boolean; round: number; actions: ChatAction[] } {
+  const p = progress.get(templateId);
+  return p ? { running: true, ...p } : { running: false, round: 0, actions: [] };
+}
+
 export async function chat(templateId: string, text: string): Promise<{ reply: string; actions: ChatAction[] }> {
   await load(templateId); // 404 before spending a Claude call
   const client = new Anthropic();
   const history = histories.get(templateId) ?? [];
   const messages: BetaMessageParam[] = [...history, { role: "user", content: text }];
   const actions: ChatAction[] = [];
+  const live = { round: 0, actions };
+  progress.set(templateId, live);
+  try {
+    return await rounds();
+  } finally {
+    progress.delete(templateId);
+  }
+
+  async function rounds(): Promise<{ reply: string; actions: ChatAction[] }> {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    live.round = turn + 1;
     const response = await client.beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
@@ -273,7 +343,8 @@ export async function chat(templateId: string, text: string): Promise<{ reply: s
     }
     messages.push({ role: "user", content: results });
   }
-  return finish(`Stopped after ${MAX_TURNS} steps. Ask me to continue.`);
+  return finish(`Stopped after ${MAX_TURNS} rounds. Ask me to continue.`);
+  }
 
   function finish(reply: string) {
     histories.set(templateId, messages);

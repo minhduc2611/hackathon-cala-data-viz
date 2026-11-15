@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import type { Template } from "../shared/types.ts";
-import { aiNote, chat, resetChat } from "./agent.ts";
+import { aiNote, chat, chatProgress, resetChat } from "./agent.ts";
 import { calaCache, dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
 import { ROOT } from "./env.ts";
@@ -111,10 +111,12 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
     return aiNote(t.id);
   }
+  if (sub === "chat" && index === "progress" && method === "GET") return chatProgress(t.id);
   if (sub === "chat" && method === "POST") {
     const message = String((await body(req)).message ?? "").trim();
     if (!message) throw new BadRequest("Write a message.");
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
+    if (chatProgress(t.id).running) throw new BadRequest("Cala AI is still working on this template. Wait for it to finish.");
     const result = await chat(t.id, message);
     return { ...result, analysis: await analyse(await load(t.id)) };
   }
@@ -138,7 +140,7 @@ function serveStatic(res: ServerResponse, pathname: string): void {
   res.end(readFileSync(target));
 }
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return serveStatic(res, url.pathname);
   try {
@@ -155,4 +157,7 @@ createServer(async (req, res) => {
     console.error(err);
     send(res, 500, { error: (err as Error).message });
   }
-}).listen(PORT, "0.0.0.0", () => console.log(`API listening on port ${PORT}`));
+});
+// Node closes requests after 5 minutes by default; an AI report run (many Cala queries and Claude rounds) can take longer.
+server.requestTimeout = 20 * 60_000;
+server.listen(PORT, "0.0.0.0", () => console.log(`API listening on port ${PORT}`));
