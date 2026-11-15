@@ -155,6 +155,7 @@ input:focus, textarea:focus { border-color: #6c9e82; }
 .field-chip-label { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; flex: none; }
 .board.filter { display: flex; flex-direction: column; }
 .board.filter > .scroll { order: 1; }
+.rowcount { text-align: right; }
 .board.filter > .rowcount { order: 2; align-self: flex-end; margin: .35rem 0 0; }
 .board.filter > .selected-tag { order: 3; }
 .board h3 { color: var(--muted); }
