@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Board, Row } from "../shared/types.ts";
 import { drill } from "../web/src/drill.ts";
 import { options, typeAt } from "../web/src/QueryBox.tsx";
-import { cleanBoard, fill, num, paramNames, runPath, runWithSelection } from "./engine.ts";
+import { aiNoteStale, cleanBoard, fill, noteFingerprint, num, paramKey, paramNames, runPath, runWithSelection } from "./engine.ts";
 
 const rows: Row[] = [
   { name: "A", city: "Oslo", funding: "10M" },
@@ -261,6 +261,19 @@ test("query box offers values Cala has shown after field=", () => {
   const city = options(s, "companies.location=new y"); // a value with spaces is replaced as a whole
   assert.deepEqual([city.word, city.items.map((i) => i.text)], ["new y", ["New York, USA"]]);
   assert.equal(options(s, "companies.industry={{ind").items.length, 0); // typing a parameter: no values
+});
+
+test("an AI note is stale when the data it describes changes", () => {
+  assert.equal(paramKey({ b: "2", a: "1" }), paramKey({ a: "1", b: "2" }));
+  const cells = [{ cell: 1, query: "companies.industry={{sector}}", rowCount: 30, sample: [{ name: "Stripe" }] }];
+  const written = noteFingerprint({ sector: "ai" }, cells);
+  const board = { type: "note" as const, text: "old", ai: "1", for: written };
+  assert.equal(aiNoteStale(board, noteFingerprint({ sector: "ai" }, cells)), false); // same data: no rewrite
+  assert.equal(aiNoteStale(board, noteFingerprint({ sector: "blockchain" }, cells)), true); // new parameter value
+  assert.equal(aiNoteStale(board, noteFingerprint({ sector: "ai" }, [{ ...cells[0], query: "people.role=CEO" }])), true); // edited query
+  assert.equal(aiNoteStale(board, noteFingerprint({ sector: "ai" }, [{ ...cells[0], rowCount: 23 }])), true); // new Cala answer
+  assert.equal(aiNoteStale({ type: "note", text: "handwritten" }, "anything"), false);
+  assert.equal(cleanBoard(board).ai, "1");
 });
 
 test("cleanBoard keeps only the type's fields", () => {

@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageParam, BetaTool, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { BOARD_TYPES, FIELDS, OPS, type Analysis, type ChatAction, type Template } from "../shared/types.ts";
 import { calaTool, queryRows } from "./cala.ts";
-import { cleanBoard } from "./engine.ts";
+import { aiNoteStale, cleanBoard, noteFingerprint, paramKey } from "./engine.ts";
 import { analyse, load, save } from "./store.ts";
 
 const MODEL = "claude-opus-5-5";
@@ -127,6 +127,83 @@ const histories = new Map<string, BetaMessageParam[]>();
 
 export function resetChat(templateId: string): void {
   histories.delete(templateId);
+}
+
+// Text already written for a parameter set. A report run does not save, so the next run with the same values is free.
+const noteCache = new Map<string, string>();
+
+export function forgetAiNotes(templateId: string): void {
+  for (const k of noteCache.keys()) if (k.startsWith(`${templateId}:`)) noteCache.delete(k);
+}
+
+async function composeNote(cells: Json[]): Promise<string> {
+  if (!cells.some((c) => (c as { rowCount?: number }).rowCount)) return "No rows for these parameters, so there is nothing to add.";
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
+  const client = new Anthropic();
+  const response = await client.beta.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    output_config: { effort: "low" },
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: `You write the note under a CalaViz report. The JSON is the cells above this note, already run for the parameters in it.
+Write the story, the insights, and the findings for these parameters. Use only numbers and names that appear in the JSON. If a figure is not there, leave it out.
+Plain prose, no title, under 160 words. End with one sentence on what not to trust.`,
+    messages: [{ role: "user", content: JSON.stringify(cells) }],
+  });
+  const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  if (!text) throw new Error("Claude returned an empty note.");
+  return text;
+}
+
+/**
+ * Rewrite AI notes whose data changed: new parameter values, an edited query or cell above, or a different
+ * Cala answer. Unchanged data costs no Claude call. Saves only when these are the template's own parameters,
+ * so a report run with other values never overwrites the saved note.
+ */
+export async function rewriteAiNotes(a: Analysis): Promise<void> {
+  const key = paramKey(a.template.params);
+  const cells = summary(a).cells as { cell: number; type?: string }[];
+  let dirty = false;
+  for (let i = 0; i < a.template.boards.length; i++) {
+    const board = a.template.boards[i];
+    if (board.ai !== "1") continue;
+    const above = cells.filter((c) => c.cell < i + 2 && c.type !== "note");
+    const fingerprint = noteFingerprint(a.template.params, above);
+    if (!aiNoteStale(board, fingerprint)) continue;
+    const step = a.run.steps[i];
+    const id = `${a.template.id}:${i}:${fingerprint}`;
+    let text = noteCache.get(id);
+    if (!text) {
+      try {
+        text = await composeNote(above);
+        noteCache.set(id, text);
+      } catch (err) {
+        if (step) step.error = (err as Error).message;
+        continue;
+      }
+    }
+    if (board.text !== text || board.for !== fingerprint) {
+      board.text = text;
+      board.for = fingerprint;
+      dirty = true;
+    }
+    if (step) step.text = text;
+  }
+  if (!dirty) return;
+  try {
+    const stored = await load(a.template.id);
+    if (paramKey(stored.params) === key) await save(a.template);
+  } catch {
+    // No saved template. The response still carries the new text.
+  }
+}
+
+/** Append an AI note. The following analysis writes it for the current parameters. */
+export async function aiNote(templateId: string): Promise<Analysis> {
+  const t = await load(templateId);
+  t.boards.push({ type: "note", text: "", ai: "1", for: "" });
+  return analyse(await save(t));
 }
 
 export async function chat(templateId: string, text: string): Promise<{ reply: string; actions: ChatAction[] }> {

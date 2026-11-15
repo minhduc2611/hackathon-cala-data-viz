@@ -1,4 +1,5 @@
 // The board engine: {{params}}, number parsing and running a path of cells.
+import { createHash } from "node:crypto";
 import { describeSelection, joinValues, selectionAt, type Selection } from "../shared/selection.ts";
 import { DEFAULTS, FIELDS, type Board, type GraphData, type Row, type Step, type Template } from "../shared/types.ts";
 
@@ -114,12 +115,36 @@ export async function runWithSelection(
   return { steps: [...full.steps.slice(0, selection.step + 1), ...below], rows: narrowed.rows };
 }
 
+/** Stable identity of a parameter set. Same values in any key order match. */
+export function paramKey(params: Record<string, string>): string {
+  return JSON.stringify(Object.keys(params).sort().map((k) => [k, params[k] ?? ""]));
+}
+
+/**
+ * What an AI note describes: the parameters and the cells above it, as summarised for Claude (resolved queries,
+ * cell settings, row counts, columns, sample rows). Any change there, from a new parameter value, an edited
+ * query or cell, or a different Cala answer, changes the fingerprint.
+ */
+export function noteFingerprint(params: Record<string, string>, cellsAbove: unknown): string {
+  return createHash("sha256").update(paramKey(params) + JSON.stringify(cellsAbove)).digest("hex").slice(0, 16);
+}
+
+/** An AI note is stale when the data it was written from is not this data. A handwritten note never is. */
+export function aiNoteStale(board: Board, fingerprint: string): boolean {
+  return board.ai === "1" && board.for !== fingerprint;
+}
+
 /** A board with exactly its type's fields, defaults filled, everything a string. */
 export function cleanBoard(input: Record<string, unknown>): Board {
   const type = input.type as Board["type"];
   if (!(type in FIELDS)) throw new Error(`Unknown cell type "${String(input.type)}". Use one of: ${Object.keys(FIELDS).join(", ")}.`);
   const board: Board = { type };
   for (const field of FIELDS[type]) board[field] = String(input[field] ?? "").trim() || DEFAULTS[field] || "";
+  // Not a form field: marks a note that must be rewritten when the parameters change, and which values it matches.
+  if (board.type === "note" && input.ai === "1") {
+    board.ai = "1";
+    board.for = String(input.for ?? "");
+  }
   return board;
 }
 

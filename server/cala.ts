@@ -97,7 +97,7 @@ function cell(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-/** Cache key: sha256 of the request. Same as the old .cache/ file names, so imported entries still hit. */
+/** Cache key: sha256 of the request. Same scheme as the old .cache/ file names, so imported tool answers still hit. */
 const keyOf = (signature: string) => createHash("sha256").update(signature).digest("hex");
 
 // shortcut: in-memory layer is unbounded; fine for a few thousand Cala answers. Add an LRU if memory grows.
@@ -143,10 +143,13 @@ export function cachedJson<T>(signature: string, fetcher: () => Promise<T>): Pro
   return cached(`meta:${signature}`, "meta", fetcher);
 }
 
-/** Rows for one resolved query. Key is the query text, as the old app stored it, so its cache still hits. */
+/** Rows for one resolved query, cached under "entities:<query>". */
 export function queryRows(query: string): Promise<Row[]> {
-  return cached(query, "query", async () => {
-    const payload = await callTool("knowledge_query", { input: query, return_entities: false });
+  // return_entities: true is what the Cala app sends. With false, Cala answers the same query differently and
+  // worse: "companies.investors=Sequoia Capital" listed Sequoia on 1 of 24 rows instead of 23 of 23 (15 Nov 2026).
+  // The "entities:" key prefix keeps answers fetched in the old mode from being served.
+  return cached(`entities:${query}`, "query", async () => {
+    const payload = await callTool("knowledge_query", { input: query, return_entities: true });
     const rows = Array.isArray(payload?.results) ? payload.results : null;
     if (!rows) throw new CalaError("Cala returned no results list.");
     if (rows[0]?.error) throw new CalaError(String(rows[0].error));
@@ -158,7 +161,7 @@ export function queryRows(query: string): Promise<Row[]> {
 
 /** "Refresh data": drop one query's cached rows so the next run asks Cala again. */
 export async function forgetQuery(query: string): Promise<void> {
-  const key = keyOf(query);
+  const key = keyOf(`entities:${query}`); // same key as queryRows
   memory.delete(key);
   await (await calaCache()).deleteOne({ _id: key });
 }

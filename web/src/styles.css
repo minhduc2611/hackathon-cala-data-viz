@@ -143,6 +143,9 @@ input:focus, textarea:focus { border-color: #6c9e82; }
 .board { border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 8px; padding: 1rem 1.1rem; margin: .8rem 0; box-shadow: 0 2px 6px #24392a06; }
 .board form:has(.cell-actions),
 .cell-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
+/* A query's default 20-column width otherwise stays ~11rem and breaks words. */
+.board form:has(.cell-actions) .querybox,
+.board form:has(.cell-actions) > textarea { flex: 1 1 18rem; min-width: min(100%, 18rem); }
 .board form .cell-actions,
 .cell-summary .cell-actions { margin-left: auto; }
 .cell-actions button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; height: calc(1.55em + 0.6rem + 2px); padding: 0 0.7rem; border: 1px solid transparent; }

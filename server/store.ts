@@ -63,11 +63,16 @@ export async function analyse(template: Template, selection?: Selection): Promis
     }
   }
   const { steps } = await runWithSelection(rows, template.boards, template.params, queryRows, selection);
-  return {
+  const result: Analysis = {
     template,
     paramNames: paramNames(template),
     run: { resolved, error, rows: rows.slice(0, ROW_CAP), rowCount: rows.length, columns: columns(rows), steps },
   };
+  if (template.boards.some((b) => b.ai === "1")) {
+    const { rewriteAiNotes } = await import("./agent.ts");
+    await rewriteAiNotes(result);
+  }
+  return result;
 }
 
 /** Drop the cached rows of every query in the template, so the next run refetches from Cala. */
@@ -75,6 +80,12 @@ export async function refresh(template: Template): Promise<void> {
   for (const query of [template.query, ...template.boards.map((b) => b.query)]) {
     const resolved = fill(query, template.params).trim();
     if (resolved) await forgetQuery(resolved);
+  }
+  if (template.boards.some((b) => b.ai === "1")) {
+    for (const b of template.boards) if (b.ai === "1") b.for = "";
+    const { forgetAiNotes } = await import("./agent.ts");
+    forgetAiNotes(template.id);
+    await save(template);
   }
 }
 

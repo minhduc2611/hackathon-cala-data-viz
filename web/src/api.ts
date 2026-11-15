@@ -42,6 +42,7 @@ export const api = {
     call<Analysis>("POST", `/templates/${id}/run`, { params, selection: selection ?? undefined }).then((a) => put(playKey(id, params, selection), a)),
   refresh: (id: string) => call<Analysis>("POST", `/templates/${id}/refresh`).then(changed(id)),
   addBoard: (id: string, board: Board, at?: number) => call<Analysis>("POST", `/templates/${id}/boards`, { ...board, at }).then(changed(id)),
+  aiNote: (id: string) => call<Analysis>("POST", `/templates/${id}/ainote`).then(changed(id)),
   saveBoard: (id: string, i: number, board: Board) => call<Analysis>("PUT", `/templates/${id}/boards/${i}`, board).then(changed(id)),
   deleteBoard: (id: string, i: number) => call<Analysis>("DELETE", `/templates/${id}/boards/${i}`).then(changed(id)),
   suggestions: () => call<Suggestions>("GET", "/suggestions").then((s) => put("suggestions", s)),

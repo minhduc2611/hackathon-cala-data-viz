@@ -152,15 +152,17 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
             </section>
           );
         }
-        if (step.board.type === "note" && step.text) {
+        if (step.board.type === "note" && (step.text || step.error)) {
+          const written = step.board.ai === "1";
           return (
             <section className="board note" key={i}>
-              {changed.length > 0 && (
+              {changed.length > 0 && !written && (
                 <p className="stale" role="note">
                   This text was written for {writtenFor}. The charts above are live for your values; the numbers in this text are not.
                 </p>
               )}
-              <p className="story">{step.text}</p>
+              {step.error && <p className="error">{step.error}</p>}
+              {step.text && <p className="story">{step.text}</p>}
             </section>
           );
         }

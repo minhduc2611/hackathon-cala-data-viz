@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import type { Template } from "../shared/types.ts";
-import { chat, resetChat } from "./agent.ts";
+import { aiNote, chat, resetChat } from "./agent.ts";
 import { calaCache, dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
 import { ROOT } from "./env.ts";
@@ -106,6 +106,10 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     else if (method === "DELETE") t.boards.splice(i, 1);
     else throw new NotFound(url.pathname);
     return analyse(await save(t));
+  }
+  if (sub === "ainote" && method === "POST") {
+    if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
+    return aiNote(t.id);
   }
   if (sub === "chat" && method === "POST") {
     const message = String((await body(req)).message ?? "").trim();

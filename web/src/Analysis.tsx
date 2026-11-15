@@ -121,7 +121,7 @@ export function Analysis({ id }: { id: string }) {
         />
       ))}
 
-      <AddCellMenu disabled={busy} onAdd={(type) => act(() => api.addBoard(id, { type } as Board))} />
+      <AddCellMenu disabled={busy} onAdd={(type) => act(() => type === "ainote" ? api.aiNote(id) : api.addBoard(id, { type } as Board))} />
       {busy && <p className="muted" role="status">Running…</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <Chat id={id} onAnalysis={show} />
