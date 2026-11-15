@@ -1,7 +1,7 @@
 // Claude agent for one template: reads the analysis, runs Cala, and edits cells through tools.
 import Anthropic from "@anthropic-ai/sdk";
 import type { BetaMessageParam, BetaTool, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { BOARD_TYPES, FIELDS, OPS, type Analysis, type ChatAction, type Template } from "../shared/types.ts";
+import { BOARD_TYPES, FIELDS, OPS, type Analysis, type ChatAction, type ChatEvent, type Template } from "../shared/types.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { calaTool, queryRows } from "./cala.ts";
@@ -130,7 +130,23 @@ function boardIndex(t: Template, cell: unknown): number {
   return i;
 }
 
-async function runTool(templateId: string, name: string, input: Json): Promise<Json> {
+/** One line for the chat window: what a tool call came back with. */
+function brief(name: string, out: Json): string {
+  if (name === "run_cala_query") return `${out.rowCount} rows`;
+  if (name === "get_cala_skill") return `${String(out.skill).length.toLocaleString()} characters`;
+  if (name === "cala_call") return out.cut ? "answer cut to 12,000 characters" : "answered";
+  if (name === "search_entities") {
+    const found = (out as { entities?: unknown[] }).entities;
+    return Array.isArray(found) ? `${found.length} found` : "answered";
+  }
+  const cells = (out.cells ?? []) as { cell: number; error?: string; rowCount?: number }[];
+  const broken = cells.filter((c) => c.error);
+  return broken.length
+    ? `${cells.length} cells; cell ${broken[0].cell}: ${broken[0].error}`
+    : `${cells.length} cells, no errors`;
+}
+
+async function runTool(templateId: string, name: string, input: Json, onChange?: (a: Analysis) => void): Promise<Json> {
   if (name === "run_cala_query") {
     const rows = await queryRows(String(input.query ?? "").trim());
     return { rowCount: rows.length, columns: [...new Set(rows.flatMap(Object.keys))], sample: sample(rows, 8) };
@@ -170,8 +186,10 @@ async function runTool(templateId: string, name: string, input: Json): Promise<J
   } else if (name !== "get_analysis") {
     throw new Error(`Unknown tool ${name}.`);
   }
-  if (name !== "get_analysis") await save(t);
-  return summary(await analyse(t));
+  if (name === "get_analysis") return summary(await analyse(t));
+  const a = await analyse(await save(t));
+  onChange?.(a);
+  return summary(a);
 }
 
 // Chat history per template, in memory: a restart starts a fresh conversation.
@@ -288,31 +306,28 @@ export async function aiNote(templateId: string): Promise<Analysis> {
   return analyse(await save(t));
 }
 
-// What a running chat has done so far, for the chat window to show while it works (a report can take minutes).
-const progress = new Map<string, { round: number; actions: ChatAction[] }>();
+// Templates with a chat running: one at a time, since every round edits and saves the template.
+const running = new Set<string>();
 
-export function chatProgress(templateId: string): { running: boolean; round: number; actions: ChatAction[] } {
-  const p = progress.get(templateId);
-  return p ? { running: true, ...p } : { running: false, round: 0, actions: [] };
-}
+export const chatRunning = (templateId: string) => running.has(templateId);
 
-export async function chat(templateId: string, text: string): Promise<{ reply: string; actions: ChatAction[] }> {
+/** Runs the tool loop; `emit` gets each round, Claude's words, each tool call and result, and each new analysis as they happen. */
+export async function chat(templateId: string, text: string, emit: (e: ChatEvent) => void = () => {}): Promise<{ reply: string; actions: ChatAction[] }> {
   await load(templateId); // 404 before spending a Claude call
   const client = new Anthropic();
   const history = histories.get(templateId) ?? [];
   const messages: BetaMessageParam[] = [...history, { role: "user", content: text }];
   const actions: ChatAction[] = [];
-  const live = { round: 0, actions };
-  progress.set(templateId, live);
+  running.add(templateId);
   try {
     return await rounds();
   } finally {
-    progress.delete(templateId);
+    running.delete(templateId);
   }
 
   async function rounds(): Promise<{ reply: string; actions: ChatAction[] }> {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    live.round = turn + 1;
+    emit({ type: "round", round: turn + 1 });
     const response = await client.beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
@@ -330,16 +345,21 @@ export async function chat(templateId: string, text: string): Promise<{ reply: s
     if (response.stop_reason === "max_tokens") return finish(reply || "The reply was cut off. Try a smaller request.");
     const uses = response.content.filter((b) => b.type === "tool_use");
     if (response.stop_reason !== "tool_use" || !uses.length) return finish(reply || "Done.");
+    if (reply) emit({ type: "text", text: reply });
     const results: BetaToolResultBlockParam[] = [];
     for (const use of uses) {
+      emit({ type: "call", action: { tool: use.name, input: use.input, error: false } });
+      let action: ChatAction;
       try {
-        const out = await runTool(templateId, use.name, use.input as Json);
+        const out = await runTool(templateId, use.name, use.input as Json, (analysis) => emit({ type: "analysis", analysis }));
         results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(out) });
-        actions.push({ tool: use.name, input: use.input, error: false });
+        action = { tool: use.name, input: use.input, error: false, result: brief(use.name, out) };
       } catch (err) {
         results.push({ type: "tool_result", tool_use_id: use.id, content: (err as Error).message, is_error: true });
-        actions.push({ tool: use.name, input: use.input, error: true });
+        action = { tool: use.name, input: use.input, error: true, result: (err as Error).message };
       }
+      actions.push(action);
+      emit({ type: "result", action });
     }
     messages.push({ role: "user", content: results });
   }

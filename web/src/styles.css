@@ -251,3 +251,6 @@ th { color: #5b665b; font-size: .8rem; }
 @media (max-width: 34rem) { .add-cell-menu { grid-template-columns: 1fr; } }
 .note-label { letter-spacing: 0.03em; }
 .chat-starter { margin-top: 0.5rem; }
+.actions .said { list-style: none; margin-left: -1.1rem; color: #2f2b26; font-style: italic; }
+.actions .result { color: #8a8278; }
+.actions .failed, .actions .failed .result { color: #a8452f; }

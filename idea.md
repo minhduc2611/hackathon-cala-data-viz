@@ -48,3 +48,32 @@ It's versatile (data exfloration, interactive reports, autocomplete, autosuggest
 
 
 what I love is the data exploration
+
+
+CalaViz is a low-code data workspace built on Cala's knowledge graph. Analysts explore the data with autosuggest and build interactive reports from cells: charts, investor networks, drill-down, fact checks and AI-written notes. Cala AI can also build a whole report for you. Each report is saved as a reusable template, so investors can change the sector or investor and get a fresh, sourced answer.
+
+Reusable template examples:
+- Where should our next check go? (https://harmless-tidy-redbird.eur-1.aiven.app/#/r/next-check): change sector from artificial intelligence to blockchain and the biggest early round drops from $2B to $47M.
+- Investor graph network (https://harmless-tidy-redbird.eur-1.aiven.app/#/r/investor-graph?investor=Sequoia+Capital&sector=blockchain+&since=2020): Sequoia Capital's co-investor network for any sector. Switch blockchain to artificial intelligence and the network changes.
+
+
+The challenge invited us to explore Cala's data, so we started by digging through the knowledge graph to find five insights worth handing to investors, like where the next check should go or who really leads the rounds in a sector. Each insight took a query, a few transformations, a chart and a written story. Then we noticed that changing the sector or the investor meant starting over.
+
+So we stopped asking "what are the five best insights?" and asked "why not let everyone find their own?" CalaViz is the result. The five insights we were hunting for became templates. Analysts can build new ones, and investors can re-run any of them with their own values and share what they find, with every number still sourced from Cala.
+
+- Explore with autosuggest: the query box suggests Cala fields as you type (industry, founded_year, investors…) and real values seen in Cala (Fintech, Sequoia Capital…).
+- Input parameters: write {{sector}} or {{investor}} in a query and it becomes an input field, so analysts build a report once with or without hardcoded values.
+- Low-code cells: chain cells to build a report, with each cell working on the one before:
+  - Data: query, join
+  - Transform: filter, sort, split, aggregate
+  - Visualize: bar and line charts, company ↔ investor network graphs
+  - Explain: notes, fact checks, AI notes
+- Reusable templates: investors open a report, type their own values and get a fresh, sourced answer. They can share it as a link with the values in it.
+- AI report maker: ask Cala AI to build a report from a query. It plans the sections, runs Cala queries, adds cells and charts, checks its work and writes the story, in under a minute.
+- AI notes: a note that reads the cells above it and writes the insight, then rewrites itself when the data changes.
+- Interactive drill-down: click a bar to see the rows behind it, or Shift-/⌘-click to select several. Every chart and table below filters to match.
+- Fact checks: compare a claimed number or name with Cala's sources and get "✓ Matches sources", "Differs from sources" or "Not in sources".
+- Trust built in: every number comes from Cala, and the report flags written notes that no longer match the values on screen.
+- Premade reports: next-check comparisons, investor networks, co-investor background checks, M&A playbooks, AI-lab alumni and funding pulses.
+
+Our personal favorite is the data exploration. I start typing a query and CalaViz suggests Cala's fields, then the real values it has seen in Cala: industries, investors, companies. One query leads to a question I hadn't planned to ask, and before I know it I'm three cells deep in a network of who backs whom. It turns a database into something you can wander through, and every step stays sourced.

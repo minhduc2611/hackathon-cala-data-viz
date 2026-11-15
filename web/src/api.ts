@@ -1,5 +1,5 @@
 import type { Selection } from "../../shared/selection.ts";
-import type { Analysis, Board, ChatReply, Suggestions, Template } from "../../shared/types.ts";
+import type { Analysis, Board, ChatEvent, ChatReply, Suggestions, Template } from "../../shared/types.ts";
 import { forget, peek, put } from "./clientCache.ts";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -46,9 +46,33 @@ export const api = {
   saveBoard: (id: string, i: number, board: Board) => call<Analysis>("PUT", `/templates/${id}/boards/${i}`, board).then(changed(id)),
   deleteBoard: (id: string, i: number) => call<Analysis>("DELETE", `/templates/${id}/boards/${i}`).then(changed(id)),
   suggestions: () => call<Suggestions>("GET", "/suggestions").then((s) => put("suggestions", s)),
-  chat: (id: string, message: string) =>
-    call<ChatReply>("POST", `/templates/${id}/chat`, { message }).then((r) => (changed(id)(r.analysis), r)),
+  /** Streams the agent's events to `onEvent` as they happen; resolves with the final reply. */
+  chat: async (id: string, message: string, onEvent: (e: ChatEvent) => void): Promise<ChatReply> => {
+    const res = await fetch(`/api/templates/${id}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(data.error ?? `HTTP ${res.status}`);
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += value ?? "";
+      const lines = buffer.split("\n");
+      buffer = done ? "" : lines.pop()!;
+      for (const line of lines.filter(Boolean)) {
+        const e = JSON.parse(line) as ChatEvent;
+        if (e.type === "analysis") changed(id)(e.analysis);
+        if (e.type === "error") throw new Error(e.error);
+        onEvent(e);
+        if (e.type === "done") return (changed(id)(e.analysis), e);
+      }
+      if (done) throw new Error("The connection closed before Cala AI finished. Reload to see what it built.");
+    }
+  },
   resetChat: (id: string) => call<object>("DELETE", `/templates/${id}/chat`),
-  chatProgress: (id: string) =>
-    call<{ running: boolean; round: number; actions: ChatReply["actions"] }>("GET", `/templates/${id}/chat/progress`),
 };

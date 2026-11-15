@@ -4,8 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
-import type { Template } from "../shared/types.ts";
-import { aiNote, chat, chatProgress, resetChat } from "./agent.ts";
+import type { ChatEvent, Template } from "../shared/types.ts";
+import { aiNote, chat, chatRunning, resetChat } from "./agent.ts";
 import { calaCache, dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
 import { ROOT } from "./env.ts";
@@ -16,6 +16,20 @@ const DIST = join(ROOT, "dist");
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
 
 class BadRequest extends Error {}
+
+/** A route answer sent as NDJSON, one event per line as it happens, instead of one JSON body at the end. */
+class Stream {
+  constructor(readonly run: (emit: (e: ChatEvent) => void) => Promise<void>) {}
+}
+
+/** Turns any error into the message the client shows. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Anthropic.APIError) {
+    const detail = (err.error as { error?: { message?: string } } | undefined)?.error?.message ?? err.message;
+    return `Claude API ${err.status ?? ""}: ${detail}`;
+  }
+  return (err as Error).message;
+}
 
 async function body(req: IncomingMessage): Promise<Record<string, any>> {
   let raw = "";
@@ -111,14 +125,15 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
     return aiNote(t.id);
   }
-  if (sub === "chat" && index === "progress" && method === "GET") return chatProgress(t.id);
   if (sub === "chat" && method === "POST") {
     const message = String((await body(req)).message ?? "").trim();
     if (!message) throw new BadRequest("Write a message.");
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
-    if (chatProgress(t.id).running) throw new BadRequest("Cala AI is still working on this template. Wait for it to finish.");
-    const result = await chat(t.id, message);
-    return { ...result, analysis: await analyse(await load(t.id)) };
+    if (chatRunning(t.id)) throw new BadRequest("Cala AI is still working on this template. Wait for it to finish.");
+    return new Stream(async (emit) => {
+      const result = await chat(t.id, message, emit);
+      emit({ type: "done", ...result, analysis: await analyse(await load(t.id)) });
+    });
   }
   if (sub === "chat" && method === "DELETE") {
     resetChat(t.id);
@@ -144,18 +159,26 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return serveStatic(res, url.pathname);
   try {
-    send(res, 200, await route(req, url));
+    const out = await route(req, url);
+    if (!(out instanceof Stream)) return send(res, 200, out);
+    // X-Accel-Buffering: proxies (nginx and similar) would otherwise hold the lines until the end.
+    res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+    const emit = (e: ChatEvent) => { if (!res.destroyed) res.write(JSON.stringify(e) + "\n"); };
+    try {
+      await out.run(emit);
+    } catch (err) {
+      if (!(err instanceof Anthropic.APIError)) console.error(err);
+      emit({ type: "error", error: errorMessage(err) });
+    }
+    res.end();
   } catch (err) {
     if (err instanceof NotFound) return send(res, 404, { error: "Not found." });
     if (err instanceof BadRequest || (err instanceof Error && err.message.startsWith("Unknown cell type"))) {
       return send(res, 400, { error: err.message });
     }
-    if (err instanceof Anthropic.APIError) {
-      const detail = (err.error as { error?: { message?: string } } | undefined)?.error?.message ?? err.message;
-      return send(res, 502, { error: `Claude API ${err.status ?? ""}: ${detail}` });
-    }
+    if (err instanceof Anthropic.APIError) return send(res, 502, { error: errorMessage(err) });
     console.error(err);
-    send(res, 500, { error: (err as Error).message });
+    send(res, 500, { error: errorMessage(err) });
   }
 });
 // Node closes requests after 5 minutes by default; an AI report run (many Cala queries and Claude rounds) can take longer.

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import type { Analysis, ChatAction } from "../../shared/types.ts";
+import type { Analysis, ChatAction, ChatEvent } from "../../shared/types.ts";
 import { api } from "./api.ts";
+
+/** What Claude did on the way to its reply, in order: its words between tool calls, and each tool call. */
+type Step = { kind: "text"; text: string } | { kind: "action"; action: ChatAction };
 
 interface Message {
   role: "user" | "claude" | "error";
   text: string;
-  actions?: ChatAction[];
+  steps?: Step[];
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -28,7 +31,34 @@ function describe(a: ChatAction): string {
   const args = input.arguments as Record<string, unknown> | undefined;
   const detail = input.query ?? input.name ?? input.section ?? (input.tool ? `${input.tool}${args?.input ? ` "${args.input}"` : ""}` : undefined)
     ?? (input.cell !== undefined ? `cell ${input.cell}` : input.type) ?? "";
-  return `${ACTION_LABEL[a.tool] ?? a.tool}${detail ? `: ${String(detail)}` : ""}${a.error ? " (failed)" : ""}`;
+  return `${ACTION_LABEL[a.tool] ?? a.tool}${detail ? `: ${String(detail)}` : ""}`;
+}
+
+function Steps({ steps }: { steps: Step[] }) {
+  if (!steps.length) return null;
+  return (
+    <ul className="actions">
+      {steps.map((s, j) => s.kind === "text"
+        ? <li key={j} className="said">{s.text}</li>
+        : (
+          <li key={j} className={s.action.error ? "failed" : undefined}>
+            {describe(s.action)}
+            <span className="result">{s.action.result === undefined ? " … running" : ` → ${s.action.result}`}</span>
+          </li>
+        ))}
+    </ul>
+  );
+}
+
+/** Adds one streamed event to the live steps. A result replaces the latest still-running call. */
+function addEvent(steps: Step[], e: ChatEvent): Step[] {
+  if (e.type === "text") return [...steps, { kind: "text", text: e.text }];
+  if (e.type === "call") return [...steps, { kind: "action", action: e.action }];
+  if (e.type === "result") {
+    const i = steps.findLastIndex((s) => s.kind === "action" && s.action.result === undefined);
+    if (i >= 0) return steps.map((s, j) => (j === i ? { kind: "action", action: e.action } : s));
+  }
+  return steps;
 }
 
 /** Chat with Cala AI, docked bottom right. It edits the analysis through tools; the page shows the result. */
@@ -37,22 +67,12 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [working, setWorking] = useState(false);
-  const [live, setLive] = useState<{ round: number; actions: ChatAction[] }>({ round: 0, actions: [] });
+  const [live, setLive] = useState<{ round: number; steps: Step[] }>({ round: 0, steps: [] });
   const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight });
   }, [messages, working, live]);
-
-  // While Cala AI works (a report can take minutes), show each step as it happens.
-  useEffect(() => {
-    if (!working) return;
-    setLive({ round: 0, actions: [] });
-    const timer = setInterval(() => {
-      api.chatProgress(id).then((p) => { if (p.running) setLive({ round: p.round, actions: p.actions }); }).catch(() => {});
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [working, id]);
 
   async function send(e: React.FormEvent, preset?: string) {
     e.preventDefault();
@@ -61,12 +81,21 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
     setText("");
     setMessages((m) => [...m, { role: "user", text: message }]);
     setWorking(true);
+    // A report can take minutes: show each step as the server streams it, and redraw the page on every edit.
+    let steps: Step[] = [];
+    let round = 0;
+    setLive({ round, steps });
     try {
-      const reply = await api.chat(id, message);
-      setMessages((m) => [...m, { role: "claude", text: reply.reply, actions: reply.actions }]);
+      const reply = await api.chat(id, message, (e) => {
+        if (e.type === "round") round = e.round;
+        if (e.type === "analysis") onAnalysis(e.analysis);
+        steps = addEvent(steps, e);
+        setLive({ round, steps });
+      });
+      setMessages((m) => [...m, { role: "claude", text: reply.reply, steps }]);
       onAnalysis(reply.analysis);
     } catch (err) {
-      setMessages((m) => [...m, { role: "error", text: (err as Error).message }]);
+      setMessages((m) => [...m, ...(steps.length ? [{ role: "claude" as const, text: "", steps }] : []), { role: "error", text: (err as Error).message }]);
     } finally {
       setWorking(false);
     }
@@ -104,15 +133,13 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
-            {m.actions && m.actions.length > 0 && (
-              <ul className="actions">{m.actions.map((a, j) => <li key={j}>{describe(a)}</li>)}</ul>
-            )}
-            <p>{m.text}</p>
+            {m.steps && <Steps steps={m.steps} />}
+            {m.text && <p>{m.text}</p>}
           </div>
         ))}
         {working && (
           <div className="msg claude" role="status">
-            {live.actions.length > 0 && <ul className="actions">{live.actions.map((a, j) => <li key={j}>{describe(a)}</li>)}</ul>}
+            <Steps steps={live.steps} />
             <p className="muted">
               Cala AI is working{live.round ? ` (round ${live.round})` : ""}. New Cala queries take up to a minute each…
             </p>

@@ -115,6 +115,8 @@ export interface ChatAction {
   tool: string;
   input: unknown;
   error: boolean;
+  /** One-line outcome, e.g. "42 rows" or the error message. Missing while the tool still runs. */
+  result?: string;
 }
 
 export interface ChatReply {
@@ -122,3 +124,13 @@ export interface ChatReply {
   actions: ChatAction[];
   analysis: Analysis;
 }
+
+/** One line of the streamed chat response (NDJSON), in the order things happen. */
+export type ChatEvent =
+  | { type: "round"; round: number }
+  | { type: "text"; text: string } // what Claude says between tool calls
+  | { type: "call"; action: ChatAction } // a tool started
+  | { type: "result"; action: ChatAction } // that tool finished (same order as its call)
+  | { type: "analysis"; analysis: Analysis } // the template changed; redraw the page
+  | ({ type: "done" } & ChatReply)
+  | { type: "error"; error: string };
