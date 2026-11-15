@@ -24,8 +24,6 @@ const ACTION_LABEL: Record<string, string> = {
   add_ai_note: "added an AI note",
 };
 
-const BUILD_PROMPT = "Build a report from this query: plan 2-4 sections, add the cells and charts, check them, and finish with an AI note.";
-
 function describe(a: ChatAction): string {
   const input = a.input as Record<string, unknown>;
   const args = input.arguments as Record<string, unknown> | undefined;
@@ -74,9 +72,9 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
     log.current?.scrollTo({ top: log.current.scrollHeight });
   }, [messages, working, live]);
 
-  async function send(e: React.FormEvent, preset?: string) {
+  async function send(e: React.FormEvent) {
     e.preventDefault();
-    const message = (preset ?? text).trim();
+    const message = text.trim();
     if (!message || working) return;
     setText("");
     setMessages((m) => [...m, { role: "user", text: message }]);
@@ -124,12 +122,7 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
       </header>
       <div className="chat-log" ref={log} aria-live="polite">
         {messages.length === 0 && (
-          <>
-            <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Cala AI runs queries and adds cells for you.</p>
-            <button type="button" className="quiet chat-starter" disabled={working} onClick={(e) => send(e, BUILD_PROMPT)}>
-              Build a report from this query
-            </button>
-          </>
+          <p className="muted">Ask for an analysis, e.g. "Chart fintech companies by country" or "Why is cell 5 empty?". Cala AI runs queries and adds cells for you.</p>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
