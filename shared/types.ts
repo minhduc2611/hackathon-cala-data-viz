@@ -127,6 +127,7 @@ export interface ChatReply {
 
 /** One line of the streamed chat response (NDJSON), in the order things happen. */
 export type ChatEvent =
+  | { type: "start"; message: string } // the message this run answers
   | { type: "round"; round: number }
   | { type: "text"; text: string } // what Claude says between tool calls
   | { type: "call"; action: ChatAction } // a tool started

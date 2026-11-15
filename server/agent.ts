@@ -306,11 +306,6 @@ export async function aiNote(templateId: string): Promise<Analysis> {
   return analyse(await save(t));
 }
 
-// Templates with a chat running: one at a time, since every round edits and saves the template.
-const running = new Set<string>();
-
-export const chatRunning = (templateId: string) => running.has(templateId);
-
 /** Runs the tool loop; `emit` gets each round, Claude's words, each tool call and result, and each new analysis as they happen. */
 export async function chat(templateId: string, text: string, emit: (e: ChatEvent) => void = () => {}): Promise<{ reply: string; actions: ChatAction[] }> {
   await load(templateId); // 404 before spending a Claude call
@@ -318,12 +313,7 @@ export async function chat(templateId: string, text: string, emit: (e: ChatEvent
   const history = histories.get(templateId) ?? [];
   const messages: BetaMessageParam[] = [...history, { role: "user", content: text }];
   const actions: ChatAction[] = [];
-  running.add(templateId);
-  try {
-    return await rounds();
-  } finally {
-    running.delete(templateId);
-  }
+  return rounds();
 
   async function rounds(): Promise<{ reply: string; actions: ChatAction[] }> {
   for (let turn = 0; turn < MAX_TURNS; turn++) {

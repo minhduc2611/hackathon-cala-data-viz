@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Analysis, ChatAction, ChatEvent } from "../../shared/types.ts";
+import type { Analysis, ChatAction, ChatEvent, ChatReply } from "../../shared/types.ts";
 import { api } from "./api.ts";
+import { Markdown, inline } from "./Markdown.tsx";
 
 /** What Claude did on the way to its reply, in order: its words between tool calls, and each tool call. */
 type Step = { kind: "text"; text: string } | { kind: "action"; action: ChatAction };
@@ -37,7 +38,7 @@ function Steps({ steps }: { steps: Step[] }) {
   return (
     <ul className="actions">
       {steps.map((s, j) => s.kind === "text"
-        ? <li key={j} className="said">{s.text}</li>
+        ? <li key={j} className="said">{inline(s.text)}</li>
         : (
           <li key={j} className={s.action.error ? "failed" : undefined}>
             {describe(s.action)}
@@ -72,31 +73,56 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
     log.current?.scrollTo({ top: log.current.scrollHeight });
   }, [messages, working, live]);
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    const message = text.trim();
-    if (!message || working) return;
-    setText("");
-    setMessages((m) => [...m, { role: "user", text: message }]);
+  const busy = useRef(false); // a ref, not state: the follow-on-load effect and a quick send must not both start
+
+  // A run may already be going (started before a reload or a dropped connection): pick it up and show it.
+  useEffect(() => {
+    follow((onEvent) => api.followChat(id, onEvent));
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Shows a run's steps as the server streams them, and redraws the page on every edit. A report can take minutes. */
+  async function follow(start: (onEvent: (e: ChatEvent) => void) => Promise<ChatReply | null>, sent?: string) {
+    if (busy.current) return;
+    busy.current = true;
     setWorking(true);
-    // A report can take minutes: show each step as the server streams it, and redraw the page on every edit.
     let steps: Step[] = [];
     let round = 0;
     setLive({ round, steps });
     try {
-      const reply = await api.chat(id, message, (e) => {
+      const reply = await start((e) => {
+        if (e.type === "start" && e.message !== sent) {
+          // Following a run this page did not start (or the server was busy with an earlier message).
+          setOpen(true);
+          setMessages((m) => [
+            ...m,
+            ...(sent ? [{ role: "error" as const, text: "Not sent: Cala AI is still working on an earlier message. Its progress is below; send yours again when it finishes." }] : []),
+            { role: "user", text: e.message },
+          ]);
+        }
         if (e.type === "round") round = e.round;
         if (e.type === "analysis") onAnalysis(e.analysis);
         steps = addEvent(steps, e);
         setLive({ round, steps });
       });
-      setMessages((m) => [...m, { role: "claude", text: reply.reply, steps }]);
-      onAnalysis(reply.analysis);
+      if (reply) {
+        setMessages((m) => [...m, { role: "claude", text: reply.reply, steps }]);
+        onAnalysis(reply.analysis);
+      }
     } catch (err) {
       setMessages((m) => [...m, ...(steps.length ? [{ role: "claude" as const, text: "", steps }] : []), { role: "error", text: (err as Error).message }]);
     } finally {
+      busy.current = false;
       setWorking(false);
     }
+  }
+
+  function send(e: React.FormEvent) {
+    e.preventDefault();
+    const message = text.trim();
+    if (!message || busy.current) return;
+    setText("");
+    setMessages((m) => [...m, { role: "user", text: message }]);
+    follow((onEvent) => api.chat(id, message, onEvent), message);
   }
 
   async function reset() {
@@ -127,7 +153,7 @@ export function Chat({ id, onAnalysis }: { id: string; onAnalysis: (a: Analysis)
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
             {m.steps && <Steps steps={m.steps} />}
-            {m.text && <p>{m.text}</p>}
+            {m.text && (m.role === "claude" ? <Markdown text={m.text} /> : <p>{m.text}</p>)}
           </div>
         ))}
         {working && (

@@ -46,33 +46,45 @@ export const api = {
   saveBoard: (id: string, i: number, board: Board) => call<Analysis>("PUT", `/templates/${id}/boards/${i}`, board).then(changed(id)),
   deleteBoard: (id: string, i: number) => call<Analysis>("DELETE", `/templates/${id}/boards/${i}`).then(changed(id)),
   suggestions: () => call<Suggestions>("GET", "/suggestions").then((s) => put("suggestions", s)),
-  /** Streams the agent's events to `onEvent` as they happen; resolves with the final reply. */
+  /** Sends a message and streams the run's events to `onEvent`. If a run is already going, follows that one instead. */
   chat: async (id: string, message: string, onEvent: (e: ChatEvent) => void): Promise<ChatReply> => {
     const res = await fetch(`/api/templates/${id}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    if (!res.ok || !res.body) {
-      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      throw new Error(data.error ?? `HTTP ${res.status}`);
-    }
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      buffer += value ?? "";
-      const lines = buffer.split("\n");
-      buffer = done ? "" : lines.pop()!;
-      for (const line of lines.filter(Boolean)) {
-        const e = JSON.parse(line) as ChatEvent;
-        if (e.type === "analysis") changed(id)(e.analysis);
-        if (e.type === "error") throw new Error(e.error);
-        onEvent(e);
-        if (e.type === "done") return (changed(id)(e.analysis), e);
-      }
-      if (done) throw new Error("The connection closed before Cala AI finished. Reload to see what it built.");
-    }
+    return (await readRun(id, res, onEvent))!;
   },
+  /** Follows a run already going on the server (after a reload or a dropped connection); null when none is. */
+  followChat: async (id: string, onEvent: (e: ChatEvent) => void): Promise<ChatReply | null> =>
+    readRun(id, await fetch(`/api/templates/${id}/chat/stream`), onEvent),
   resetChat: (id: string) => call<object>("DELETE", `/templates/${id}/chat`),
 };
+
+/** Reads a streamed chat run (NDJSON) to its end. Null when the server answered JSON: no run to follow. */
+async function readRun(id: string, res: Response, onEvent: (e: ChatEvent) => void): Promise<ChatReply | null> {
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  if (!res.headers.get("Content-Type")?.includes("ndjson")) return null;
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    // If the connection drops, the server keeps working and saving; say so instead of a bare "network error".
+    const { value, done } = await reader.read().catch(() => {
+      throw new Error("Lost the connection to Cala AI. It keeps working on the server: reload the page to follow it again.");
+    });
+    buffer += value ?? "";
+    const lines = buffer.split("\n");
+    buffer = done ? "" : lines.pop()!;
+    for (const line of lines.filter(Boolean)) {
+      const e = JSON.parse(line) as ChatEvent;
+      if (e.type === "analysis") changed(id)(e.analysis);
+      if (e.type === "error") throw new Error(e.error);
+      onEvent(e);
+      if (e.type === "done") return (changed(id)(e.analysis), e);
+    }
+    if (done) throw new Error("The connection closed before Cala AI finished. Reload the page to follow it again.");
+  }
+}

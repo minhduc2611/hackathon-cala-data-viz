@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import type { ChatEvent, Template } from "../shared/types.ts";
-import { aiNote, chat, chatRunning, resetChat } from "./agent.ts";
+import { aiNote, chat, resetChat } from "./agent.ts";
 import { calaCache, dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
 import { ROOT } from "./env.ts";
@@ -17,11 +17,6 @@ const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javas
 
 class BadRequest extends Error {}
 
-/** A route answer sent as NDJSON, one event per line as it happens, instead of one JSON body at the end. */
-class Stream {
-  constructor(readonly run: (emit: (e: ChatEvent) => void) => Promise<void>) {}
-}
-
 /** Turns any error into the message the client shows. */
 function errorMessage(err: unknown): string {
   if (err instanceof Anthropic.APIError) {
@@ -29,6 +24,42 @@ function errorMessage(err: unknown): string {
     return `Claude API ${err.status ?? ""}: ${detail}`;
   }
   return (err as Error).message;
+}
+
+/** A chat run outlives the request that started it: after a dropped connection or a reload, the page follows it again. */
+interface Run {
+  events: ChatEvent[];
+  listeners: Set<(e: ChatEvent) => void>;
+}
+
+// One run per template at a time, since every round edits and saves the template.
+const runs = new Map<string, Run>();
+
+function startRun(id: string, message: string): Run {
+  const run: Run = { events: [], listeners: new Set() };
+  runs.set(id, run);
+  const emit = (e: ChatEvent) => {
+    run.events.push(e);
+    for (const listen of run.listeners) listen(e);
+  };
+  emit({ type: "start", message });
+  (async () => {
+    try {
+      const result = await chat(id, message, emit);
+      emit({ type: "done", ...result, analysis: await analyse(await load(id)) });
+    } catch (err) {
+      if (!(err instanceof Anthropic.APIError)) console.error(err);
+      emit({ type: "error", error: errorMessage(err) });
+    } finally {
+      runs.delete(id);
+    }
+  })();
+  return run;
+}
+
+/** A route answer sent as NDJSON: the run's events so far, then each new one as it happens. */
+class Stream {
+  constructor(readonly run: Run) {}
 }
 
 async function body(req: IncomingMessage): Promise<Record<string, any>> {
@@ -129,11 +160,12 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     const message = String((await body(req)).message ?? "").trim();
     if (!message) throw new BadRequest("Write a message.");
     if (!process.env.ANTHROPIC_API_KEY) throw new BadRequest("ANTHROPIC_API_KEY missing. Put it in cala-data-visualization/.env.");
-    if (chatRunning(t.id)) throw new BadRequest("Cala AI is still working on this template. Wait for it to finish.");
-    return new Stream(async (emit) => {
-      const result = await chat(t.id, message, emit);
-      emit({ type: "done", ...result, analysis: await analyse(await load(t.id)) });
-    });
+    // Already working: follow that run instead (its "start" event tells the page which message it is answering).
+    return new Stream(runs.get(t.id) ?? startRun(t.id, message));
+  }
+  if (sub === "chat" && index === "stream" && method === "GET") {
+    const run = runs.get(t.id);
+    return run ? new Stream(run) : { running: false };
   }
   if (sub === "chat" && method === "DELETE") {
     resetChat(t.id);
@@ -163,14 +195,27 @@ const server = createServer(async (req, res) => {
     if (!(out instanceof Stream)) return send(res, 200, out);
     // X-Accel-Buffering: proxies (nginx and similar) would otherwise hold the lines until the end.
     res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
-    const emit = (e: ChatEvent) => { if (!res.destroyed) res.write(JSON.stringify(e) + "\n"); };
-    try {
-      await out.run(emit);
-    } catch (err) {
-      if (!(err instanceof Anthropic.APIError)) console.error(err);
-      emit({ type: "error", error: errorMessage(err) });
-    }
-    res.end();
+    const { run } = out;
+    const write = (e: ChatEvent) => { if (!res.destroyed) res.write(JSON.stringify(e) + "\n"); };
+    // Catch up: every event so far, but only the newest analysis (each is a whole page of rows).
+    const lastAnalysis = run.events.findLastIndex((e) => e.type === "analysis");
+    run.events.forEach((e, i) => { if (e.type !== "analysis" || i === lastAnalysis) write(e); });
+    // Hosting proxies drop a connection that is silent for ~60 s, and one Cala query can take that long.
+    // An empty line every 15 s keeps it open; the client skips empty lines.
+    const keepAlive = setInterval(() => { if (!res.destroyed) res.write("\n"); }, 15_000);
+    const listen = (e: ChatEvent) => {
+      write(e);
+      if (e.type === "done" || e.type === "error") stop();
+    };
+    const stop = () => {
+      clearInterval(keepAlive);
+      run.listeners.delete(listen);
+      res.end();
+    };
+    res.on("close", stop); // the page went away; the run carries on
+    const last = run.events.at(-1)?.type;
+    if (last === "done" || last === "error") stop();
+    else run.listeners.add(listen);
   } catch (err) {
     if (err instanceof NotFound) return send(res, 404, { error: "Not found." });
     if (err instanceof BadRequest || (err instanceof Error && err.message.startsWith("Unknown cell type"))) {

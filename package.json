@@ -6,7 +6,7 @@
     "dev": "tsx watch server/index.ts & vite",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
-    "test": "tsx --test server/engine.test.ts"
+    "test": "tsx --test server/engine.test.ts web/src/Markdown.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
