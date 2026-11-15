@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Analysis as AnalysisData, Board } from "../../shared/types.ts";
 import { AddCellMenu } from "./AddCellMenu.tsx";
-import { api } from "./api.ts";
+import { api, cachedView } from "./api.ts";
 import { Cell } from "./Cell.tsx";
 import { Chat } from "./Chat.tsx";
 import { QueryBox } from "./QueryBox.tsx";
@@ -14,12 +14,14 @@ export function Analysis({ id }: { id: string }) {
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
+  const [hints, setHints] = useState<Record<string, string>>({});
 
   function show(next: AnalysisData) {
     setData(next);
     setName(next.template.name);
     setQuery(next.template.query);
     setParams(next.template.params);
+    setHints(next.template.paramHints ?? {});
   }
 
   /** Every change goes through here: the server saves, re-runs the path and returns it. */
@@ -36,6 +38,9 @@ export function Analysis({ id }: { id: string }) {
   }
 
   useEffect(() => {
+    // Show the last version from the client cache at once, then replace it with the server's answer.
+    const cached = cachedView.analysis(id);
+    if (cached) show(cached);
     act(() => api.get(id));
   }, [id]);
 
@@ -55,14 +60,19 @@ export function Analysis({ id }: { id: string }) {
   const paramNames = [...new Set(used.flatMap((t) => [...(t ?? "").matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1])))];
   const run1 = (e: React.FormEvent) => {
     e.preventDefault();
-    act(() => api.update(id, { name, query, params }));
+    act(() => api.update(id, { name, query, params, paramHints: hints }));
   };
 
   return (
     <main aria-busy={busy}>
       <p className="topbar">
         <a href="#/">All templates</a>
-        <a className="play" href={`#/r/${id}`}>run report</a>
+        <a className="play" href={`#/r/${id}`}>
+          <svg className="icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+            <path d="M5 3.2v9.6l8-4.8z" />
+          </svg>
+          run report
+        </a>
       </p>
       <section className="board">
         <h3>[1] query · main</h3>
@@ -79,14 +89,18 @@ export function Analysis({ id }: { id: string }) {
             </button>
           </p>
           <QueryBox id="q-main" value={query} onChange={setQuery} />
-          <p>
+          <p className="param-fields">
             {paramNames.map((p) => (
               <label key={p}>
-                <span className="label-chip">{p}</span> <input value={params[p] ?? ""} onChange={(e) => setParams({ ...params, [p]: e.target.value })} />
+                <span className="label-chip">{p}</span>
+                <input aria-label={`${p} value`} placeholder="default value" value={params[p] ?? ""} onChange={(e) => setParams({ ...params, [p]: e.target.value })} />
+                <input className="hint" aria-label={`${p} description`} placeholder="Description on the report" value={hints[p] ?? ""} onChange={(e) => setHints({ ...hints, [p]: e.target.value })} />
               </label>
             ))}
-            <button type="submit" disabled={busy}>Run</button>{" "}
-            <button type="button" className="quiet" disabled={busy} onClick={() => act(() => api.refresh(id))}>Refresh data</button>
+            <span className="param-actions">
+              <button type="submit" disabled={busy}>Run</button>
+              <button type="button" className="quiet" disabled={busy} onClick={() => act(() => api.refresh(id))}>Refresh data</button>
+            </span>
           </p>
         </form>
         {run.error && <p className="error">{run.error}</p>}

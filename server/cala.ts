@@ -1,12 +1,9 @@
-// Cala over MCP (https://api.cala.ai/mcp/), every call cached on disk keyed by the request.
+// Cala over MCP (https://api.cala.ai/mcp/), every call cached in MongoDB keyed by the request.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Row } from "../shared/types.ts";
-import { ROOT } from "./env.ts";
+import { calaCache, type CacheDoc } from "./db.ts";
 
 const MCP = "https://api.cala.ai/mcp/";
-export const CACHE = join(ROOT, ".cache");
 
 export class CalaError extends Error {}
 
@@ -100,32 +97,55 @@ function cell(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-export function cachePath(signature: string): string {
-  return join(CACHE, createHash("sha256").update(signature).digest("hex") + ".json");
-}
+/** Cache key: sha256 of the request. Same as the old .cache/ file names, so imported entries still hit. */
+const keyOf = (signature: string) => createHash("sha256").update(signature).digest("hex");
 
+// shortcut: in-memory layer is unbounded; fine for a few thousand Cala answers. Add an LRU if memory grows.
+const memory = new Map<string, unknown>();
 // Same request in flight twice (page + chat) waits on one Cala call.
 const inFlight = new Map<string, Promise<unknown>>();
 
-async function cached<T>(signature: string, fetcher: () => Promise<T>): Promise<T> {
-  const path = cachePath(signature);
-  if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8"));
-  let pending = inFlight.get(path) as Promise<T> | undefined;
+/**
+ * Every Cala answer is cached in MongoDB ("cala_cache") with a memory layer in front: Cala is only called on a
+ * true miss, which saves credits and makes repeat runs instant on every machine and deploy. If MongoDB is
+ * unreachable, the call still works, just uncached.
+ */
+async function cached<T>(signature: string, kind: CacheDoc["kind"], fetcher: () => Promise<T>): Promise<T> {
+  const key = keyOf(signature);
+  if (memory.has(key)) return memory.get(key) as T;
+  let pending = inFlight.get(key) as Promise<T> | undefined;
   if (!pending) {
-    pending = fetcher().then((value) => {
-      mkdirSync(CACHE, { recursive: true });
-      writeFileSync(path, JSON.stringify(value));
+    pending = (async () => {
+      const store = await calaCache().catch((err) => { console.warn(`Cala cache unavailable: ${(err as Error).message}`); });
+      const hit = store ? await store.findOne({ _id: key }).catch(() => null) : null;
+      if (hit) {
+        const value = JSON.parse(hit.json) as T;
+        memory.set(key, value);
+        return value;
+      }
+      const value = await fetcher();
+      memory.set(key, value);
+      await store?.updateOne(
+        { _id: key },
+        { $set: { kind, json: JSON.stringify(value), signature: signature.slice(0, 500), createdAt: new Date() } },
+        { upsert: true },
+      ).catch((err) => console.warn(`Could not cache a Cala answer: ${(err as Error).message}`));
       return value;
-    });
-    pending.finally(() => inFlight.delete(path)).catch(() => {});
-    inFlight.set(path, pending);
+    })();
+    pending.finally(() => inFlight.delete(key)).catch(() => {});
+    inFlight.set(key, pending);
   }
   return pending;
 }
 
+/** Any cacheable JSON that is not a Cala MCP call (e.g. Cala's public OpenAPI entity types). */
+export function cachedJson<T>(signature: string, fetcher: () => Promise<T>): Promise<T> {
+  return cached(`meta:${signature}`, "meta", fetcher);
+}
+
 /** Rows for one resolved query. Key is the query text, as the old app stored it, so its cache still hits. */
 export function queryRows(query: string): Promise<Row[]> {
-  return cached(query, async () => {
+  return cached(query, "query", async () => {
     const payload = await callTool("knowledge_query", { input: query, return_entities: false });
     const rows = Array.isArray(payload?.results) ? payload.results : null;
     if (!rows) throw new CalaError("Cala returned no results list.");
@@ -136,15 +156,22 @@ export function queryRows(query: string): Promise<Row[]> {
   });
 }
 
-export function forgetQuery(query: string): void {
-  if (existsSync(cachePath(query))) unlinkSync(cachePath(query));
+/** "Refresh data": drop one query's cached rows so the next run asks Cala again. */
+export async function forgetQuery(query: string): Promise<void> {
+  const key = keyOf(query);
+  memory.delete(key);
+  await (await calaCache()).deleteOne({ _id: key });
 }
 
-/** Any other Cala MCP tool (entity_search, entity_introspection), cached by tool + arguments. */
+/** Any other Cala MCP tool (entity_search, entity_introspection, entity_retrieval), cached by tool + arguments. */
 export function calaTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  return cached(`${name}:${JSON.stringify(args)}`, () => callTool(name, args));
+  return cached(`${name}:${JSON.stringify(args)}`, "tool", () => callTool(name, args));
 }
 
-export function cachedQueryFiles(): string[] {
-  return existsSync(CACHE) ? readdirSync(CACHE).filter((f) => /^[0-9a-f]{64}\.json$/.test(f)).map((f) => join(CACHE, f)) : [];
+/** Rows of recent cached queries, for the query-box field and value suggestions. */
+export async function cachedQueryRows(limit = 300): Promise<Row[][]> {
+  const store = await calaCache().catch(() => undefined);
+  if (!store) return [];
+  const docs = await store.find({ kind: "query" }, { projection: { json: 1 } }).sort({ createdAt: -1 }).limit(limit).toArray();
+  return docs.map((d) => JSON.parse(d.json) as Row[]).filter(Array.isArray);
 }

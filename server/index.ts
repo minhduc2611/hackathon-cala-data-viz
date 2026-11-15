@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize } from "node:path";
 import type { Template } from "../shared/types.ts";
 import { chat, resetChat } from "./agent.ts";
-import { dbName, templates } from "./db.ts";
+import { calaCache, dbName, templates } from "./db.ts";
 import { cleanBoard } from "./engine.ts";
 import { ROOT } from "./env.ts";
 import { NotFound, analyse, create, list, load, refresh, remove, save, suggestions } from "./store.ts";
@@ -46,7 +46,12 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
   if (parts[0] === "suggestions" && method === "GET") return suggestions();
   if (parts[0] === "health" && method === "GET") {
     // Which store this deploy reads, without exposing the host or credentials.
-    return { storage: "mongodb", database: dbName(), templates: await (await templates()).countDocuments() };
+    return {
+      storage: "mongodb",
+      database: dbName(),
+      templates: await (await templates()).countDocuments(),
+      calaCache: await (await calaCache()).countDocuments(), // cached Cala answers: each one is a call not paid for again
+    };
   }
   if (parts[0] !== "templates") throw new NotFound(url.pathname);
   if (parts.length === 1) {
@@ -65,6 +70,11 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     if (typeof b.name === "string" && b.name.trim()) t.name = b.name.trim();
     if (typeof b.query === "string") t.query = b.query.trim();
     Object.assign(t.params, cleanParams(b.params));
+    if (b.paramHints && typeof b.paramHints === "object") {
+      const hints = Object.fromEntries(Object.entries(cleanParams(b.paramHints)).filter(([, v]) => v));
+      if (Object.keys(hints).length) t.paramHints = hints;
+      else delete t.paramHints;
+    }
     return analyse(await save(t));
   }
   if (sub === "run" && method === "POST") {
@@ -80,7 +90,7 @@ async function route(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ...run, savedParams: t.params };
   }
   if (sub === "refresh" && method === "POST") {
-    refresh(t);
+    await refresh(t);
     return analyse(t);
   }
   if (sub === "boards") {

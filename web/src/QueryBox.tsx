@@ -1,14 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Suggestions } from "../../shared/types.ts";
-import { api } from "./api.ts";
+import { api, cachedView } from "./api.ts";
 
 let shared: Promise<Suggestions> | undefined;
 let complete = false;
 /** Fetched once per page; asked again (on the next focus) only while the server's schema is still incomplete. */
 const loadSuggestions = () => {
   if (!shared || !complete) {
-    shared = api.suggestions().catch(() => ({ entities: [], fields: [] }));
-    shared.then((s) => { complete = Object.keys(s.schema ?? {}).length >= 4; });
+    const fresh = api.suggestions();
+    // The client cache answers at once (works offline too); the server refreshes it once per page load.
+    const cached = cachedView.suggestions();
+    shared = cached ? Promise.resolve(cached) : fresh.catch(() => ({ entities: [], fields: [] }));
+    fresh.then((s) => { complete = Object.keys(s.schema ?? {}).length >= 4; shared = Promise.resolve(s); }).catch(() => {});
   }
   return shared;
 };
@@ -29,21 +32,43 @@ function chips(text: string) {
 export interface Item {
   text: string; // inserted
   hint?: string; // shown next to it
+  path?: string; // shown in italics before the hint, e.g. "company.name"
 }
 
 /** The entity type at the end of a dot path: "companies.founders." is on Person. */
+/** Entity words Cala understands anywhere in a path, e.g. "Location={{location}}.companies". */
+const ENTITY_WORDS: Record<string, string> = { companies: "Company", people: "Person" };
+
 export function typeAt(s: Suggestions, path: string): string | undefined {
-  const segments = path.split(".").map((seg) => /^\s*([\w ]+?)\s*(?:[=!<>(]|$)/.exec(seg)?.[1]?.toLowerCase() ?? "");
+  const raw = path.split(".");
+  const segments = raw.map((seg) => /^\s*([\w ]+?)\s*(?:[=!<>(]|$)/.exec(seg)?.[1]?.toLowerCase() ?? "");
   let type = s.aliases?.[segments[0]];
-  for (const seg of segments.slice(1)) {
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
     const rel = type ? s.schema?.[type]?.relations.find((r) => r.word === seg) : undefined;
-    if (rel) type = rel.type; // stepping into a related entity; a property or filter keeps the type
+    if (rel) type = rel.type; // stepping into a related entity
+    // A bare entity word mid-path ("Location=Helsinki.companies") also steps in: Cala resolves that link itself.
+    // A filter ("location=Finland") or a property keeps the type.
+    else if (/^\s*[\w ]+\s*$/.test(raw[i]) && ENTITY_WORDS[seg]) type = ENTITY_WORDS[seg];
   }
   return type;
 }
 
 /** Words to offer for the text left of the cursor. */
 export function options(s: Suggestions, text: string): { word: string; items: Item[] } {
+  // After "field=" (or "field!="): offer values Cala has shown for that field. The value may contain spaces.
+  const valueAt = /(?:^|\.)\s*(\w+)\s*!?=([^.=()]*)$/.exec(text);
+  if (valueAt && !valueAt[2].includes("{{")) {
+    const known = s.values?.[valueAt[1].toLowerCase()] ?? s.values?.[valueAt[1]] ?? [];
+    const typed = valueAt[2].trimStart();
+    const want = typed.toLowerCase();
+    const items = known
+      .filter((v) => v.toLowerCase().includes(want) && v !== typed)
+      .sort((a, b) => Number(!a.toLowerCase().startsWith(want)) - Number(!b.toLowerCase().startsWith(want)))
+      .slice(0, 30)
+      .map((v) => ({ text: v, hint: "seen in Cala" }));
+    if (items.length) return { word: typed, items };
+  }
   const word = /\w*$/.exec(text)![0];
   const before = text.slice(0, text.length - word.length);
   const inReturn = before.lastIndexOf("return(") > before.lastIndexOf(")");
@@ -59,21 +84,30 @@ export function options(s: Suggestions, text: string): { word: string; items: It
       ...(!inReturn && schema
         ? [...schema.relations]
           .sort((a, b) => Number(Boolean(b.tested)) - Number(Boolean(a.tested)))
-          .map((r) => ({ text: r.word, hint: `→ ${r.type ?? "related"}${r.tested ? " · tested" : ""} · ${r.rel}` }))
+          .map((r) => ({
+            text: r.word,
+            hint: `→ ${r.type ?? "related"}${r.tested ? " · tested" : ""}${r.examples?.length ? ` · e.g. ${r.examples.slice(0, 2).join(", ")}` : ` · ${r.rel}`}`,
+          }))
+        : []),
+      ...(!inReturn
+        ? Object.entries(ENTITY_WORDS).map(([text, to]) => ({ text, hint: `→ ${to} · Cala resolves the link` }))
         : []),
       ...(schema ? schema.properties.map((p) => ({ text: p, hint: `${type} property` })) : []),
-      ...s.fields.map((f) => ({ text: f, hint: "seen in results" })),
+      // Fields Cala has returned before: where they sit (entity.property) and how to ask for them.
+      ...s.fields.map((f) => ({ text: f, path: `${(type ?? "entity").toLowerCase()}.${f}`, hint: `.return(${f})` })),
       ...(inReturn ? [] : [{ text: "limit=" }, { text: "order_by=" }, { text: "return(" }]),
     ];
   }
+  // Match anywhere in the word ("companie" finds headquartered_companies); words that start with it come first.
   const w = word.toLowerCase();
   const seen = new Set<string>();
   const items = pool.filter((o) => {
-    if (seen.has(o.text) || !o.text.toLowerCase().startsWith(w) || o.text === word) return false;
+    if (seen.has(o.text) || !o.text.toLowerCase().includes(w) || o.text === word) return false;
     seen.add(o.text);
     return true;
   });
-  return { word, items: items.slice(0, 80) };
+  const starts = items.filter((o) => o.text.toLowerCase().startsWith(w));
+  return { word, items: [...starts, ...items.filter((o) => !starts.includes(o))].slice(0, 80) };
 }
 
 interface Props {
@@ -188,7 +222,12 @@ export function QueryBox({ id, value, onChange, label }: Props) {
               onMouseDown={(e) => { e.preventDefault(); pick(i); }}
             >
               <span>{item.text}</span>
-              {item.hint && <span className="suggest-hint">{item.hint}</span>}
+              {(item.path || item.hint) && (
+                <span className="suggest-hint">
+                  {item.path && <i>{item.path}</i>}
+                  {item.hint}
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -99,7 +99,8 @@ export interface Analysis {
 export interface EntitySchema {
   properties: string[];
   // word to type in the query; type at the other end if known; tested = seen working in a real query
-  relations: { word: string; rel: string; type?: string; tested?: boolean }[];
+  // examples = names of real neighbours Cala returned for the sample entity
+  relations: { word: string; rel: string; type?: string; tested?: boolean; examples?: string[] }[];
 }
 
 export interface Suggestions {
@@ -107,6 +108,7 @@ export interface Suggestions {
   fields: string[];
   schema?: Record<string, EntitySchema>; // by entity type: Company, Person, …
   aliases?: Record<string, string>; // query start word -> type, e.g. companies -> Company
+  values?: Record<string, string[]>; // values to offer after "field=", e.g. industry -> FINTECH, …
 }
 
 export interface ChatAction {

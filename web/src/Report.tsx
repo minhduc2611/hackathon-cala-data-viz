@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Selection } from "../../shared/selection.ts";
 import type { Analysis, Board } from "../../shared/types.ts";
-import { api } from "./api.ts";
+import { api, cachedView } from "./api.ts";
 import { ChartTabs } from "./Cell.tsx";
 import { Table } from "./Table.tsx";
 import { GraphView } from "./GraphView.tsx";
@@ -33,6 +33,12 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
   async function run(params: Record<string, string>, sel: Selection | null = null) {
     setBusy(true);
     setError("");
+    // A report seen before (same values, same selection) shows at once; the server's answer then replaces it.
+    const cached = cachedView.play(id, params, sel);
+    if (cached) {
+      setData(cached);
+      setSelection(sel);
+    }
     try {
       const next = await api.play(id, params, sel);
       setData(next);
@@ -77,7 +83,6 @@ export function Report({ id, initial }: { id: string; initial: Record<string, st
     <main className="report" aria-busy={busy}>
       <p className="topbar">
         <a href={`#/a/${id}`}>← Edit template</a>
-        <a href="#/">All templates</a>
       </p>
       <h1>{fill(data.template.name, params)}</h1>
 

@@ -229,6 +229,40 @@ test("query box follows relationships to the right entity type", () => {
   assert.deepEqual(options(s, "companies.founders.return(link").items.map((i) => i.text), ["linkedin_url"]);
 });
 
+test("query box: entity words mid-path, and matching anywhere in a word", () => {
+  const s = {
+    entities: ["companies", "people", "Location"],
+    fields: ["name"],
+    aliases: { companies: "Company", people: "Person", location: "Location" },
+    schema: {
+      Location: { properties: ["latitude", "longitude"], relations: [] },
+      Company: { properties: ["legal_name"], relations: [{ word: "headquartered_in", rel: "HAS_HEADQUARTERS_IN", type: "Country" }] },
+    },
+  };
+  // The user's query: "companie" after a Location filter now offers "companies".
+  assert.deepEqual(options(s, "Location={{location}}.companie").items.map((i) => i.text), ["companies"]);
+  // ...and after it, the box is on Company.
+  assert.equal(typeAt(s, "Location={{location}}.companies"), "Company");
+  assert.ok(options(s, "Location={{location}}.companies.").items.some((i) => i.text === "legal_name"));
+  // A filter on a field that is also an entity name does not switch type.
+  assert.equal(typeAt(s, "companies.location=Finland"), "Company");
+  // Substring match, prefix matches first.
+  assert.deepEqual(options(s, "companies.quarter").items.map((i) => i.text), ["headquartered_in"]);
+});
+
+test("query box offers values Cala has shown after field=", () => {
+  const s = {
+    entities: [], fields: [],
+    values: { industry: ["FINTECH", "SOFTWARE_AND_SERVICES", "BIOTECH"], location: ["San Francisco, USA", "New York, USA"] },
+  };
+  assert.deepEqual(options(s, "companies.industry=").items.map((i) => i.text), ["FINTECH", "SOFTWARE_AND_SERVICES", "BIOTECH"]);
+  const fin = options(s, "companies.industry=fin");
+  assert.deepEqual([fin.word, fin.items.map((i) => i.text)], ["fin", ["FINTECH"]]);
+  const city = options(s, "companies.location=new y"); // a value with spaces is replaced as a whole
+  assert.deepEqual([city.word, city.items.map((i) => i.text)], ["new y", ["New York, USA"]]);
+  assert.equal(options(s, "companies.industry={{ind").items.length, 0); // typing a parameter: no values
+});
+
 test("cleanBoard keeps only the type's fields", () => {
   assert.deepEqual(cleanBoard({ type: "chart", x: "a", y: "b", extra: "z" }), { type: "chart", kind: "bar", x: "a", y: "b" });
   assert.throws(() => cleanBoard({ type: "pivot" }), /Unknown cell type/);
